@@ -1,5 +1,16 @@
 # Solutions Review — epm-platform
 
+## Resolution Log (updated 2026-07-07)
+| ID | Status | Note |
+|---|---|---|
+| SR-CR-1 | ✅ Resolved | Foundation gained `AuthContextEnricher` hook (optional, backward-compatible); `TokenVerifier` uses it. Merged to `main` (commit ebdb1fe). api typecheck ✅, tests 17/17 ✅. |
+| SR-MJ-2 | ✅ Resolved | `AuthController.callback` now publishes `auth.login.succeeded` (same change). |
+| SR-MJ-1 | ⏳ Open — needs Chavakorn | Shared `ScopedRef.ancestorIds` subtree contract — add to `@epm/shared` + adopt in project-execution design. |
+| SR-MN-1 | ⏳ Open | Document permission-namespace convention in foundation.md. |
+| SR-MN-2 | ⏳ Open | Centralize RBAC registry bootstrap. |
+
+---
+
 ## Review Summary
 - **Date**: 2026-07-07
 - **Units Reviewed**: identity-access (full design) vs. **foundation** baseline + shared auth contract
