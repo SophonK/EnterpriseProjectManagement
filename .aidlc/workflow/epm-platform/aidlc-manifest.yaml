@@ -177,7 +177,7 @@ units:
     phase: "design"
     completedPhases: []
     implementationMode: null
-    implementation: { totalTasks: 32, completedTasks: 14, currentTask: "3.6", currentWave: "Wave3" }
+    implementation: { totalTasks: 32, completedTasks: 32, currentTask: "8.6", currentWave: "Wave5-complete" }
     artifacts:
       design:
         status: "approved"

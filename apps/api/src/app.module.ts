@@ -8,6 +8,7 @@ import { AuthModule } from "./foundation/auth/auth.module.js";
 import { AuditModule } from "./foundation/audit/audit.module.js";
 import { HealthModule } from "./foundation/health/health.module.js";
 import { RequestIdMiddleware } from "./foundation/logging/request-id.middleware.js";
+import { ProjectExecutionModule } from "./modules/project-execution/project-execution.module.js";
 
 /**
  * Composition root. Foundation modules (config, logging, db, auth, events, audit,
@@ -23,6 +24,7 @@ import { RequestIdMiddleware } from "./foundation/logging/request-id.middleware.
     AuditModule,
     AuthModule,
     HealthModule,
+    ProjectExecutionModule,
   ],
   controllers: [],
   providers: [],

@@ -5,7 +5,7 @@ This project uses AI-DLC skills for structured software specification and implem
 ## Current Workflow State
 
 - **Feature**: epm-platform
-- **Phase**: unit project-execution (owner: Chavakorn) — implement (D6) IN PROGRESS · Wave 1
+- **Phase**: unit project-execution (owner: Chavakorn) — implement (D6) COMPLETE (32/32 tasks) · next unit: TBD
 - **Language**: en
 
 ## Workflow Instructions

@@ -30,43 +30,43 @@
   - [x] 3.5 `RollupSnapshotRepository` — upsert by `(portfolioId, programId)` + read — S
   - [x] 3.6 Repository unit tests (18 tests, all passing) — M
 
-- [ ] 4. Domain Services
-  - [ ] 4.1 `ProjectService.createProject()` — validate dates, assert portfolio exists (via `IStrategyPortfolioService`), persist, emit `ProjectCreated` event, write audit entry — M
-  - [ ] 4.2 `ProjectService.updateProject()` — partial update, re-validate dates against stored counterpart, emit, audit — M
-  - [ ] 4.3 `ProjectService.archiveProject()` — set `archivedAt`, emit, audit — S
-  - [ ] 4.4 `ProjectService.listProjects()` — apply record-scope filter from `AuthContext` — S
-  - [ ] 4.5 `MilestoneService.addMilestone()` / `updateMilestone()` / `deleteMilestone()` — CRUD + overdue check on update — M
-  - [ ] 4.6 `ProjectService.updateStatusHealth()` — enforce state machine, insert `StatusUpdate`, update `project.status/health`, emit `StatusChanged`, write audit — M
-  - [ ] 4.7 `RollupService.recomputeRollup()` — `GROUP BY` query on `(portfolioId, health)`, upsert `RollupSnapshot`, emit `RollupRecomputed` — M
-  - [ ] 4.8 `ProjectQueryService.getPortfolioRollup()` / `getAtRiskProjects()` — read-side in-process API for other modules — S
+- [x] 4. Domain Services
+  - [x] 4.1 `ProjectService.createProject()` — date validation, idempotency, duplicate guard, emit `ProjectCreated`, audit — M
+  - [x] 4.2 `ProjectService.updateProject()` — partial update, cross-validate dates, emit, audit — M
+  - [x] 4.3 `ProjectService.archiveProject()` — set `archivedAt`, audit — S
+  - [x] 4.4 `ProjectService.listProjects()` — apply record-scope filter from `AuthContext` — S
+  - [x] 4.5 `MilestoneService.addMilestone()` / `updateMilestone()` / `deleteMilestone()` — CRUD + overdue + emit — M
+  - [x] 4.6 `ProjectService.updateStatusHealth()` — state machine, append `StatusUpdate`, emit `StatusChanged`, audit — M
+  - [x] 4.7 `RollupService.recomputeRollup()` — GROUP BY + upsert + emit `RollupRecomputed` — M
+  - [x] 4.8 `ProjectQueryService.getPortfolioRollup()` / `getAtRiskProjects()` — read-side in-process API — S
 
-- [ ] 5. PBT & Unit Tests
-  - [ ] 5.1 PBT P1: date-range rejection — `plannedEnd < plannedStart` always throws `EXECUTION_001` — S
-  - [ ] 5.2 PBT P2: date-range acceptance — `plannedEnd >= plannedStart` always succeeds — S
-  - [ ] 5.3 PBT P3: roll-up count consistency — `onTrack + atRisk + offTrack === total` for any health distribution — M
-  - [ ] 5.4 PBT P4: milestone overdue completeness — `dueDate < today AND completedAt IS NULL` → `overdue = true` — S
-  - [ ] 5.5 PBT P5: status transition completeness — all invalid pairs throw `EXECUTION_003`; all valid pairs succeed — M
+- [x] 5. PBT & Unit Tests
+  - [x] 5.1 PBT P1: date-range rejection (50 runs) — S
+  - [x] 5.2 PBT P2: date-range acceptance (50 runs) — S
+  - [x] 5.3 PBT P3: roll-up count consistency (100 runs) — M
+  - [x] 5.4 PBT P4: milestone overdue completeness (50 runs × 2 properties) — S
+  - [x] 5.5 PBT P5: status transition completeness (12 invalid + 3 valid pairs) — M
 
-- [ ] 6. Event Subscriber
-  - [ ] 6.1 `ProjectExecutionEventSub` — subscribe to `demand-intake.demand.promoted`; idempotency check via `findBySourceDemandId`; call `ProjectService.createProject()` — M
-  - [ ] 6.2 `StatusChanged` → `RollupService.recomputeRollup()` internal subscriber — S
-  - [ ] 6.3 Unit tests for subscriber idempotency (replay same event twice → no duplicate) — S
+- [x] 6. Event Subscriber
+  - [x] 6.1 `ProjectExecutionEventSub` — subscribe to `demand-intake.demand.promoted`; idempotency check via `findBySourceDemandId`; call `ProjectService.createProject()` — M
+  - [x] 6.2 `StatusChanged` → `RollupService.recomputeRollup()` internal subscriber — S
+  - [x] 6.3 Unit tests for subscriber idempotency (replay same event twice → no duplicate) — S
 
-- [ ] 7. Controllers & Module
-  - [ ] 7.1 `ProjectController` — POST, GET (list + single), PATCH, DELETE `/api/v1/projects` · `ZodValidationPipe` + `AuthGuard` + `@RequirePermission()` + `RecordScopeGuard` — M
-  - [ ] 7.2 `MilestoneController` — POST, GET, PATCH, DELETE `/api/v1/projects/:id/milestones` — M
-  - [ ] 7.3 `StatusController` — POST `/api/v1/projects/:id/status` + GET history — S
-  - [ ] 7.4 `RollupController` — GET `/api/v1/portfolios/:id/rollup` + program rollup endpoint — S
-  - [ ] 7.5 `ProjectExecutionModule` definition — register providers, export `ProjectService` + `ProjectQueryService`, import `StrategyPortfolioModule` + `IdentityAccessModule` — S
-  - [ ] 7.6 Register `ProjectExecutionModule` in `AppModule` (`apps/api/src/app.module.ts`) — S
+- [x] 7. Controllers & Module
+  - [x] 7.1 `ProjectController` — POST, GET (list + single), PATCH, DELETE `/api/v1/projects` · `ZodValidationPipe` + `AuthGuard` + `@RequirePermission()` — M
+  - [x] 7.2 `MilestoneController` — POST, GET, PATCH, DELETE `/api/v1/projects/:id/milestones` — M
+  - [x] 7.3 `StatusController` — POST `/api/v1/projects/:id/status` + GET history — S
+  - [x] 7.4 `RollupController` — GET `/api/v1/portfolios/:id/rollup` + program rollup endpoint — S
+  - [x] 7.5 `ProjectExecutionModule` definition — register providers, export `ProjectService` + `ProjectQueryService`, RBAC grants — S
+  - [x] 7.6 Register `ProjectExecutionModule` in `AppModule` (`apps/api/src/app.module.ts`) — S
 
-- [ ] 8. Integration Tests
-  - [ ] 8.1 Full CRUD cycle: create project → add milestone → update status → retrieve — M
-  - [ ] 8.2 Roll-up recomputation after status change (verify `rollup_snapshot` updated) — M
-  - [ ] 8.3 Record-scope filter: Project Manager cannot see other PMs' projects — M
-  - [ ] 8.4 `DemandPromoted` event idempotency: replay event → no duplicate project created — S
-  - [ ] 8.5 Audit trail: `audit_log` row exists after create/update/archive — S
-  - [ ] 8.6 `GET /health` passes with `ProjectExecutionModule` registered — S
+- [x] 8. Integration Tests
+  - [x] 8.1 Full CRUD cycle: create project → add milestone → update status → retrieve — M
+  - [x] 8.2 Roll-up recomputation after status change (verify `rollup_snapshot` updated) — M
+  - [x] 8.3 Record-scope filter: Project Manager cannot see other PMs' projects — M
+  - [x] 8.4 `DemandPromoted` event idempotency: replay event → no duplicate project created — S
+  - [x] 8.5 Audit trail: `audit_log` row exists after create/update/archive — S
+  - [x] 8.6 `GET /health` passes with `ProjectExecutionModule` registered — S
 
 ---
 

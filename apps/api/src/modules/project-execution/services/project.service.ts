@@ -47,6 +47,11 @@ export class ProjectService {
       if (existing) return existing;
     }
 
+    // Date range validation
+    if (new Date(cmd.plannedEnd) < new Date(cmd.plannedStart)) {
+      throw new AppError("EXECUTION_001", "plannedEnd must be on or after plannedStart");
+    }
+
     // Duplicate name guard within portfolio
     const duplicate = await this.projectRepo.existsByNameInPortfolio(cmd.name, cmd.portfolioId);
     if (duplicate) throw new AppError("EXECUTION_004", `Project "${cmd.name}" already exists in this portfolio`);
