@@ -177,9 +177,25 @@ units:
     phase: "design"
     completedPhases: []
     implementationMode: null
-    implementation: { totalTasks: 0, completedTasks: 0, currentTask: null, currentWave: null }
-    artifacts: {}
-    decisions: {}
+    implementation: { totalTasks: 32, completedTasks: 14, currentTask: "3.6", currentWave: "Wave3" }
+    artifacts:
+      design:
+        status: "approved"
+        timestamp: "2026-07-08T00:00:00Z"
+        files: [design.md, design/components.md, design/data-model.md, design/api-spec.md, design/integration.md, design/implementation.md, design/nfr.md, design/correctness.md, design/functional-design.md, design/nfr-requirements.md, design/nfr-design.md]
+      tasks:
+        status: "approved"
+        timestamp: "2026-07-08T00:00:00Z"
+        files: [tasks.md]
+    decisions:
+      design:
+        rollup: "event-driven (StatusChanged → RollupHandler)"
+        overdueDetection: "lazy real-time on read + materialized overdue column"
+        softDelete: "archivedAt on Project"
+        statusStateMachine: "Open → Active → Completed/Cancelled"
+        healthEnum: "OnTrack / AtRisk / OffTrack"
+        plannedBudget: "Decimal attribute, Phase 2 extended by financials"
+        pbt: "P1-P5: date-range, rollup math, milestone overdue, state transitions"
   - name: "resource-management"
     owner: "Chavakorn"
     status: "not-started"

@@ -59,3 +59,89 @@ model ProcessedEvent {
   @@map("processed_events")
   @@schema("shared")
 }
+
+// ---------------------------------------------------------------------------
+// project-execution unit (`execution` schema).
+// ---------------------------------------------------------------------------
+
+model Project {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String    @db.VarChar(200)
+  description    String?
+  ownerUserId    String    @map("owner_user_id") @db.Uuid
+  portfolioId    String    @map("portfolio_id") @db.Uuid
+  programId      String?   @map("program_id") @db.Uuid
+  status         String    @default("Open")
+  health         String    @default("OnTrack")
+  plannedStart   DateTime  @map("planned_start") @db.Date
+  plannedEnd     DateTime  @map("planned_end") @db.Date
+  plannedBudget  Decimal?  @map("planned_budget") @db.Decimal(18, 2)
+  sourceDemandId String?   @map("source_demand_id") @db.Uuid
+  archivedAt     DateTime? @map("archived_at") @db.Timestamptz(6)
+  createdBy      String    @map("created_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  milestones     Milestone[]
+  statusUpdates  StatusUpdate[]
+
+  @@index([portfolioId], name: "idx_project_portfolio")
+  @@index([programId], name: "idx_project_program")
+  @@index([ownerUserId], name: "idx_project_owner")
+  @@index([portfolioId, health], name: "idx_project_health")
+  @@map("project")
+  @@schema("execution")
+}
+
+model Milestone {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId   String    @map("project_id") @db.Uuid
+  title       String    @db.VarChar(300)
+  description String?
+  dueDate     DateTime  @map("due_date") @db.Date
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  overdue     Boolean   @default(false)
+  sortOrder   Int       @default(0) @map("sort_order")
+  createdBy   String    @map("created_by") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId], name: "idx_milestone_project")
+  @@map("milestone")
+  @@schema("execution")
+}
+
+/// Append-only status history. No updates or deletes.
+model StatusUpdate {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId  String   @map("project_id") @db.Uuid
+  status     String
+  health     String
+  note       String?
+  recordedBy String   @map("recorded_by") @db.Uuid
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+
+  project    Project  @relation(fields: [projectId], references: [id])
+
+  @@index([projectId, recordedAt(sort: Desc)], name: "idx_status_update_project_time")
+  @@map("status_update")
+  @@schema("execution")
+}
+
+/// Materialized roll-up snapshot per portfolio/program. Upserted on StatusChanged events.
+model RollupSnapshot {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  portfolioId   String    @map("portfolio_id") @db.Uuid
+  programId     String?   @map("program_id") @db.Uuid
+  onTrackCount  Int       @default(0) @map("on_track_count")
+  atRiskCount   Int       @default(0) @map("at_risk_count")
+  offTrackCount Int       @default(0) @map("off_track_count")
+  totalCount    Int       @default(0) @map("total_count")
+  computedAt    DateTime  @map("computed_at") @db.Timestamptz(6)
+
+  @@unique([portfolioId, programId], name: "uq_rollup_portfolio_program")
+  @@map("rollup_snapshot")
+  @@schema("execution")
+}
