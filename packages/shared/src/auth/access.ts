@@ -1,8 +1,33 @@
 // @epm/shared — pure RBAC + record-scope decision logic (property P3).
 import type { AuthContext, ScopedRef } from "./auth-context.js";
-import type { Permission, RecordScope, Role } from "./roles.js";
+import type { Permission, RecordScope, Role, ScopeType } from "./roles.js";
 
 export const EPMO_DIRECTOR: Role = "EPMO_DIRECTOR";
+
+/**
+ * Build a ScopedRef for a record, INCLUDING its hierarchy ancestors so that
+ * subtree scope grants resolve correctly (solutions-review SR-MJ-1).
+ *
+ * **Contract**: any hierarchical resource (project under program/portfolio, etc.)
+ * MUST be checked with its `ancestorIds` populated (root→parent). Use this helper
+ * so a Director's portfolio-subtree grant authorizes projects beneath it.
+ *
+ * @example
+ * canAccess(ctx, "project:read",
+ *   buildScopedRef("project", project.id, [project.portfolioId, project.programId]),
+ *   rbac.permitted);
+ */
+export function buildScopedRef(
+  type: ScopeType,
+  id: string,
+  ancestorIds: ReadonlyArray<string | null | undefined> = [],
+): ScopedRef {
+  return {
+    type,
+    id,
+    ancestorIds: ancestorIds.filter((a): a is string => typeof a === "string" && a.length > 0 && a !== id),
+  };
+}
 
 /** True if a scope grant covers the given record (direct id or subtree ancestor). */
 export function scopeCovers(scope: RecordScope, record: ScopedRef): boolean {
