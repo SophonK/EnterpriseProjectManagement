@@ -114,6 +114,14 @@ epm-web/
 - **Versioning**: SemVer; breaking change = major bump + migration note. Web repo pins a version.
 - Source of truth for cross-unit and cross-repo contracts.
 
+### Authorization contracts (all units MUST follow)
+- **Record scoping (SR-MJ-1)**: when checking record-level access on a hierarchical resource
+  (project under program/portfolio, etc.), build the `ScopedRef` with `@epm/shared`
+  `buildScopedRef(type, id, ancestorIds)` so that subtree grants resolve. Omitting `ancestorIds`
+  silently breaks Director/portfolio-subtree access.
+- **Permission namespace (SR-MN-1)**: one namespace per unit, `[domain]:[action]`
+  (e.g. `identity:*`, `project:*`, `resource:*`, `risk:*`, `portfolio:*`, `intake:*`, `report:*`).
+
 ---
 
 ## Code & Data Conventions

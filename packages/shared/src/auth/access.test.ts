@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { SCOPE_TYPES, type RecordScope, type Role } from "./roles.js";
 import type { AuthContext, ScopedRef } from "./auth-context.js";
-import { canAccess, canAccessRecord } from "./access.js";
+import { canAccess, canAccessRecord, buildScopedRef } from "./access.js";
+import type { AuthContext as Ctx } from "./auth-context.js";
 
 const nonDirectorRoles: Role[] = [
   "PORTFOLIO_MANAGER",
@@ -86,5 +87,28 @@ describe("RBAC record-scope evaluation (PBT — property P3)", () => {
         expect(canAccess(ctx, "project:read", record, () => false)).toBe(false);
       }),
     );
+  });
+});
+
+describe("buildScopedRef (SR-MJ-1 subtree contract)", () => {
+  it("drops empty/self ancestor ids and keeps order", () => {
+    const ref = buildScopedRef("project", "proj-1", ["port-1", null, undefined, "", "proj-1", "prog-1"]);
+    expect(ref).toEqual({ type: "project", id: "proj-1", ancestorIds: ["port-1", "prog-1"] });
+  });
+
+  it("lets a portfolio-subtree grant authorize a project beneath it", () => {
+    // Non-director user granted the whole portfolio subtree.
+    const ctx: Ctx = {
+      userId: "u",
+      roles: ["PORTFOLIO_MANAGER"],
+      recordScopes: [{ type: "project", subtreeRootId: "port-1" }],
+    };
+    // A project under port-1 → access granted BECAUSE ancestorIds includes port-1.
+    const withAncestors = buildScopedRef("project", "proj-9", ["port-1", "prog-2"]);
+    expect(canAccessRecord(ctx, withAncestors)).toBe(true);
+
+    // Same project WITHOUT ancestors → subtree grant cannot match (the bug SR-MJ-1 prevents).
+    const withoutAncestors = buildScopedRef("project", "proj-9");
+    expect(canAccessRecord(ctx, withoutAncestors)).toBe(false);
   });
 });
