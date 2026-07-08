@@ -5,9 +5,9 @@
 |---|---|---|
 | SR-CR-1 | ✅ Resolved | Foundation gained `AuthContextEnricher` hook (optional, backward-compatible); `TokenVerifier` uses it. Merged to `main` (commit ebdb1fe). api typecheck ✅, tests 17/17 ✅. |
 | SR-MJ-2 | ✅ Resolved | `AuthController.callback` now publishes `auth.login.succeeded` (same change). |
-| SR-MJ-1 | ⏳ Open — needs Chavakorn | Shared `ScopedRef.ancestorIds` subtree contract — add to `@epm/shared` + adopt in project-execution design. |
-| SR-MN-1 | ⏳ Open | Document permission-namespace convention in foundation.md. |
-| SR-MN-2 | ⏳ Open | Centralize RBAC registry bootstrap. |
+| SR-MJ-1 | ✅ Resolved (adopt in project-execution) | `@epm/shared` `buildScopedRef(type, id, ancestorIds)` added + contract documented in foundation.md. Merged to `main` (commit a8e0b5c). shared 14/14 ✅. project-execution must USE it (handed off to Chavakorn). |
+| SR-MN-1 | ✅ Resolved | Permission-namespace convention (`[domain]:[action]`, one per unit) documented in foundation.md. |
+| SR-MN-2 | ⏳ Open | Centralize RBAC registry bootstrap (minor; handle during identity/other unit implement). |
 
 ---
 
