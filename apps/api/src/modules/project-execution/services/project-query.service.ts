@@ -1,5 +1,12 @@
 import { Injectable } from "@nestjs/common";
-import type { AuthContext, ProjectDTO, RollupSummaryDTO } from "@epm/shared";
+import {
+  AppError,
+  buildScopedRef,
+  canAccessRecord,
+  type AuthContext,
+  type ProjectDTO,
+  type RollupSummaryDTO,
+} from "@epm/shared";
 import { ProjectRepository } from "../repositories/project.repository.js";
 import { RollupService } from "./rollup.service.js";
 
@@ -13,8 +20,14 @@ export class ProjectQueryService {
 
   async getPortfolioRollup(
     portfolioId: string,
-    programId: string | null = null,
+    programId: string | null,
+    ctx: AuthContext,
   ): Promise<RollupSummaryDTO | null> {
+    // Record-scope the aggregate read: NOT_FOUND (not FORBIDDEN) so a portfolio's
+    // existence isn't revealed to callers outside its scope. Director passes.
+    if (!canAccessRecord(ctx, buildScopedRef("portfolio", portfolioId))) {
+      throw AppError.notFound(`portfolio ${portfolioId}`);
+    }
     return this.rollupService.getRollup(portfolioId, programId);
   }
 
