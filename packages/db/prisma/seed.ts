@@ -7,13 +7,36 @@ import { ROLES } from "@epm/shared";
 
 const prisma = new PrismaClient();
 
+// identity-access permissions granted to the EPMO Director.
+const IDENTITY_PERMISSIONS = [
+  "identity:list-users",
+  "identity:assign-role",
+  "identity:grant-scope",
+  "identity:view-audit",
+];
+
 async function main(): Promise<void> {
-  // Connectivity check — fails fast if DATABASE_URL is wrong.
   await prisma.$queryRaw`SELECT 1`;
 
-  // Reference only: the identity-access unit persists these into `identity.role`.
-  console.warn(`[seed] foundation baseline — no rows to insert.`);
-  console.warn(`[seed] canonical role catalog (${ROLES.length}): ${ROLES.join(", ")}`);
+  // Seed the 8 roles.
+  for (const key of ROLES) {
+    await prisma.role.upsert({ where: { key }, create: { key }, update: {} });
+  }
+  // Seed identity permissions.
+  for (const key of IDENTITY_PERMISSIONS) {
+    await prisma.permission.upsert({ where: { key }, create: { key }, update: {} });
+  }
+  // Grant the identity:* permissions to EPMO_DIRECTOR.
+  const director = await prisma.role.findUniqueOrThrow({ where: { key: "EPMO_DIRECTOR" } });
+  for (const key of IDENTITY_PERMISSIONS) {
+    const perm = await prisma.permission.findUniqueOrThrow({ where: { key } });
+    await prisma.rolePermission.upsert({
+      where: { roleId_permissionId: { roleId: director.id, permissionId: perm.id } },
+      create: { roleId: director.id, permissionId: perm.id },
+      update: {},
+    });
+  }
+  console.warn(`[seed] roles=${ROLES.length}, identity permissions=${IDENTITY_PERMISSIONS.length}, Director granted`);
 }
 
 main()

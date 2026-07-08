@@ -59,3 +59,84 @@ model ProcessedEvent {
   @@map("processed_events")
   @@schema("shared")
 }
+
+// ---------------------------------------------------------------------------
+// identity-access unit — `identity` schema (users, RBAC, record scopes)
+// ---------------------------------------------------------------------------
+
+model User {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subject     String    @unique // IdP `sub`
+  email       String?
+  displayName String?   @map("display_name")
+  status      String    @default("active") // active | inactive
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  roles  UserRole[]
+  scopes UserScope[]
+
+  @@map("user")
+  @@schema("identity")
+}
+
+model Role {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String           @unique // one of the 8 ROLES
+  description String?
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@map("role")
+  @@schema("identity")
+}
+
+model Permission {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String           @unique // [domain]:[action]
+  description String?
+  roles       RolePermission[]
+
+  @@map("permission")
+  @@schema("identity")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id") @db.Uuid
+  permissionId String     @map("permission_id") @db.Uuid
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permission")
+  @@schema("identity")
+}
+
+model UserRole {
+  userId    String   @map("user_id") @db.Uuid
+  roleId    String   @map("role_id") @db.Uuid
+  grantedBy String?  @map("granted_by") @db.Uuid
+  grantedAt DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_role")
+  @@schema("identity")
+}
+
+model UserScope {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  scopeType     String   @map("scope_type") // portfolio | program | project | resource-pool
+  scopeId       String?  @map("scope_id") @db.Uuid
+  subtreeRootId String?  @map("subtree_root_id") @db.Uuid
+  grantedBy     String?  @map("granted_by") @db.Uuid
+  grantedAt     DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_scope")
+  @@schema("identity")
+}

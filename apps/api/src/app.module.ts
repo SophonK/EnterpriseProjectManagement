@@ -7,6 +7,7 @@ import { EventsModule } from "./foundation/events/events.module.js";
 import { AuthModule } from "./foundation/auth/auth.module.js";
 import { AuditModule } from "./foundation/audit/audit.module.js";
 import { HealthModule } from "./foundation/health/health.module.js";
+import { IdentityAccessModule } from "./modules/identity-access/identity-access.module.js";
 import { RequestIdMiddleware } from "./foundation/logging/request-id.middleware.js";
 
 /**
@@ -23,6 +24,7 @@ import { RequestIdMiddleware } from "./foundation/logging/request-id.middleware.
     AuditModule,
     AuthModule,
     HealthModule,
+    IdentityAccessModule,
   ],
   controllers: [],
   providers: [],

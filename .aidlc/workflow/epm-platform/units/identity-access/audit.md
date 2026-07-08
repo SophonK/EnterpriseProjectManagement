@@ -1,5 +1,19 @@
 # Audit Trail — epm-platform / unit: identity-access (owner: Sophon)
 
+### [2026-07-07T14:30:00Z] design (identity-access): approval → tasks
+
+**Phase**: design → tasks (unit: identity-access)
+**Action**: approval + tasks decision-gate
+**Artifacts**: manifest (design approved, phase=tasks, completedPhases=[design]); units/identity-access/decisions-tasks.md
+**Outcome**: identity design approved (SR-CR-1 foundation dependency resolved). Generated D4 gate (7 questions). Awaiting answers.
+
+### [2026-07-07T15:00:00Z] Implementation Complete: identity-access (autonomous)
+
+**Phase**: implement (unit: identity-access, autonomous mode)
+**Action**: all 24 tasks implemented
+**Artifacts**: schema.prisma (6 identity models) + migration 0004_identity_init + seed; @epm/shared (identity types + events); apps/api/src/modules/identity-access/{logic(+test), identity.repository, user-directory.service, identity-auth-enricher, rbac-bootstrap.service, user-provisioning.service, admin.services, dto, identity-admin.controller, identity-access.module}.ts; app.module wired
+**Outcome**: pass — api typecheck 0; tests 21/21 (PBT P-IA-1/2/3 green); shared+db typecheck 0. DB-driven authz via enricher (bound to foundation hook); JIT provisioning via login event (idempotent); Director-gated audited admin endpoints. Runtime-deferred: migrate/seed apply + Testcontainers integration (no Docker/DB). 24/24.
+
 ### [2026-07-07T13:40:00Z] design (identity-access): decision-gate
 
 **Phase**: design (unit: identity-access)

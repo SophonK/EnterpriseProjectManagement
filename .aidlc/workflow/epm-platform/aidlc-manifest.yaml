@@ -155,16 +155,20 @@ units:
         container: "Docker multi-stage + docker-compose"
   - name: "identity-access"
     owner: "Sophon"
-    status: "in-progress"
-    phase: "design"
-    completedPhases: []
-    implementationMode: null
-    implementation: { totalTasks: 0, completedTasks: 0, currentTask: null, currentWave: null }
+    status: "completed"
+    phase: "completed"
+    completedPhases: [design, tasks, implement]
+    implementationMode: autonomous
+    implementation: { totalTasks: 24, completedTasks: 24, currentTask: null, currentWave: null }
     design:
       expandMode: expanded
     artifacts:
+      tasks:
+        status: "approved"
+        timestamp: "2026-07-07T14:35:00Z"
+        files: [tasks.md]
       design:
-        status: "draft"
+        status: "approved"
         timestamp: "2026-07-07T14:05:00Z"
         files: [design.md, design/components.md, design/data-model.md, design/api-spec.md, design/integration.md, design/implementation.md, design/nfr.md, design/correctness.md, design/functional-design.md, design/nfr-requirements.md, design/nfr-design.md, design/infrastructure.md]
     decisions:

@@ -5,7 +5,7 @@ This project uses AI-DLC skills for structured software specification and implem
 ## Current Workflow State
 
 - **Feature**: epm-platform
-- **Phase**: foundation COMPLETED + reviewed. Now unit project-execution (owner: Chavakorn) — design (D3)
+- **Phase**: foundation ✅ + identity-access ✅ (Sophon) complete. project-execution (Chavakorn) in progress. 4 units remain.
 - **Language**: en
 
 ## Workflow Instructions

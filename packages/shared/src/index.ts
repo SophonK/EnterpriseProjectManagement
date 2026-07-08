@@ -8,3 +8,5 @@ export * from "./auth/schemas.js";
 export * from "./auth/access.js";
 export * from "./events/domain-event.js";
 export * from "./events/serialization.js";
+export * from "./events/identity-events.js";
+export * from "./types/identity.js";
