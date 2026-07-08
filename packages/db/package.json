@@ -1,0 +1,32 @@
+{
+  "name": "@epm/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "prisma generate",
+    "validate": "prisma validate",
+    "format": "prisma format",
+    "migrate": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
+    "seed": "tsx prisma/seed.ts",
+    "lint": "echo \"@epm/db: prisma schema\"",
+    "test": "echo \"@epm/db: unit tests n/a\"",
+    "test:int": "vitest run --config vitest.config.int.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.19.0"
+  },
+  "devDependencies": {
+    "@epm/shared": "workspace:*",
+    "@testcontainers/postgresql": "^10.13.0",
+    "prisma": "^5.19.0",
+    "testcontainers": "^10.13.0",
+    "tsx": "^4.17.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

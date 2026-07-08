@@ -1,0 +1,61 @@
+// EPM Platform — Prisma schema.
+// Single PostgreSQL database, one schema per bounded-context unit (+ `shared` for foundation tables).
+// Cross-schema writes are forbidden by convention; only `reporting` reads across schemas.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["identity", "strategy", "execution", "resource", "risk", "intake", "reporting", "shared"]
+}
+
+// ---------------------------------------------------------------------------
+// Foundation-owned cross-cutting tables (`shared` schema).
+// Domain models are owned by each unit under its own schema.
+// ---------------------------------------------------------------------------
+
+/// Immutable audit trail. No app-level UPDATE/DELETE (enforced by DB role + convention).
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @map("actor_id") @db.Uuid
+  action     String // create | update | delete | access_denied
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id") @db.Uuid
+  before     Json?
+  after      Json?
+  requestId  String   @map("request_id")
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([entityType, entityId])
+  @@index([occurredAt])
+  @@map("audit_log")
+  @@schema("shared")
+}
+
+/// Transactional outbox — event row committed with the state change, relayed post-commit.
+model OutboxEvent {
+  eventId     String    @id @map("event_id") @db.Uuid
+  eventType   String    @map("event_type")
+  payload     Json
+  occurredAt  DateTime  @map("occurred_at") @db.Timestamptz(6)
+  processedAt DateTime? @map("processed_at") @db.Timestamptz(6)
+
+  @@index([processedAt])
+  @@map("outbox")
+  @@schema("shared")
+}
+
+/// Idempotency ledger — at-most-once effect per (eventId, handler).
+model ProcessedEvent {
+  eventId     String   @map("event_id") @db.Uuid
+  handler     String
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@id([eventId, handler])
+  @@map("processed_events")
+  @@schema("shared")
+}

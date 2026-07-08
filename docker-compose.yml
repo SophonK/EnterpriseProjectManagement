@@ -1,0 +1,41 @@
+# OPTIONAL (method 2) — containerized local stack. The primary local workflow does NOT
+# require Docker: run your own PostgreSQL and `pnpm dev` (see README).
+#   docker compose up
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: epm
+      POSTGRES_PASSWORD: epm
+      POSTGRES_DB: epm
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U epm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      NODE_ENV: development
+      PORT: "3000"
+      DATABASE_URL: postgresql://epm:epm@postgres:5432/epm?schema=shared
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:9000/}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-epm-platform}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-change-me}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:3000/auth/callback}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

@@ -1,0 +1,88 @@
+name: CI
+
+# Primary pipeline — runs Node + Postgres directly on the runner (no Docker image build
+# required for CI). The containerized path (Dockerfile / docker-compose) is optional; see README.
+
+on:
+  push:
+    branches: ["main", "feature/**"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    # GitHub-managed Postgres — the workflow author writes no Dockerfile/compose.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: epm
+          POSTGRES_PASSWORD: epm
+          POSTGRES_DB: epm
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U epm"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://epm:epm@localhost:5432/epm?schema=shared
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable pnpm (corepack)
+        run: corepack enable
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @epm/db exec prisma generate
+
+      - name: Apply migrations (Postgres service)
+        run: pnpm --filter @epm/db exec prisma migrate deploy
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build
+
+      - name: Unit + property-based tests
+        run: pnpm test
+
+  # Optional: Testcontainers-based integration tests. Uses the runner's Docker engine,
+  # so it is kept separate from the primary non-Docker path and never blocks it.
+  integration:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @epm/db exec prisma generate
+      - name: Integration tests (Testcontainers)
+        run: pnpm --filter @epm/db test:int

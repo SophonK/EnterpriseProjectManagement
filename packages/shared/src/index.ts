@@ -1,0 +1,10 @@
+// @epm/shared — public barrel. Consumed by the API (all units) and the web repo (published).
+export * from "./errors/error-codes.js";
+export * from "./errors/problem-details.js";
+export * from "./errors/app-error.js";
+export * from "./auth/roles.js";
+export * from "./auth/auth-context.js";
+export * from "./auth/schemas.js";
+export * from "./auth/access.js";
+export * from "./events/domain-event.js";
+export * from "./events/serialization.js";

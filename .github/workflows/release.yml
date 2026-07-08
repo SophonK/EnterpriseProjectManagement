@@ -1,0 +1,42 @@
+name: Release
+
+# CD — publishes the shared contract package and performs a rolling deploy.
+# The deploy target (cloud) is finalized in the Operations phase; the deploy step
+# is a documented placeholder until then.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  publish-shared:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://npm.pkg.github.com
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @epm/shared build
+      # Publish @epm/shared for the separate web repo to consume (SemVer-pinned).
+      - name: Publish @epm/shared
+        run: pnpm --filter @epm/shared publish --no-git-checks --access restricted
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    needs: publish-shared
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      # Rolling deploy: run migrations, then roll out new API replicas gated on /health.
+      # TODO(Operations phase): wire the real cloud target (compute + managed Postgres + secrets).
+      - name: Rolling deploy (placeholder)
+        run: echo "Deploy step to be finalized in the aidlc-operations phase (rolling, migration-gated, health-checked)."

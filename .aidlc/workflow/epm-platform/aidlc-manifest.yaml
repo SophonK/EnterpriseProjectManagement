@@ -1,0 +1,218 @@
+version: "3.0"
+feature: "epm-platform"
+language: "en"
+platform: "claude-code"
+created: "2026-07-07T09:00:00Z"
+updated: "2026-07-07T09:00:00Z"
+state:
+  status: "active"
+  owner: "Sophon"
+  team:
+    size: 2
+    model: tech-lead-devs
+    gitRemote: "https://github.com/SophonK/EnterpriseProjectManagement.git"
+  sharedPhases: [context, requirements, plan, decomposition, foundation]
+  mode: incremental
+  foundationSkipped: false
+  implementationMode: null
+  quickPath: false
+extensions:
+  team-multi-developer: enabled
+  security-baseline: enabled
+  resiliency-baseline: enabled
+  property-based-testing: partial
+design:
+  expandMode: expanded
+artifacts:
+  context:
+    status: "approved"
+    timestamp: "2026-07-07T09:00:00Z"
+    files: [context.md]
+  requirements:
+    status: "approved"
+    timestamp: "2026-07-07T09:15:00Z"
+    files: [requirements.md, personas.md]
+  plan:
+    status: "approved"
+    timestamp: "2026-07-07T09:25:00Z"
+    files: [plan.md]
+  decomposition:
+    status: "approved"
+    timestamp: "2026-07-07T09:45:00Z"
+    files: [units.md]
+  foundation:
+    status: "approved"
+    timestamp: "2026-07-07T09:45:00Z"
+    files: [foundation.md]
+  code-review:
+    status: "approved"
+    timestamp: "2026-07-07T13:05:00Z"
+    files: [code-review.md]
+    scope: "unit:foundation"
+implementation:
+  totalTasks: 0
+  completedTasks: 0
+  currentTask: null
+  currentWave: null
+context-summary:
+  type: "Greenfield"
+  stack: "Pending D3 decisions"
+  architecture: "Pending D2/D3 (modular/service-oriented, 8 bounded domains)"
+  feature: "Enterprise Project & Portfolio Management (EPM/EPPM) platform for an EPMO to allocate resources, manage cross-team risks, and align projects to strategic business goals."
+  impact: "New standalone"
+  complexity: "High"
+  teamSize: "small"
+  recommendations: { personas: true, units: true, nfr: true }
+decisions:
+  requirements:
+    mvpScope: "Governance-first — portfolio/project/resource/RAID + dashboards; financials deferred"
+    mvpUsers: "EPMO Director, Portfolio Manager, Project Manager, Resource Manager"
+    hierarchy: "Goal/OKR → Portfolio → Program → Project → Milestone"
+    resourceDepth: "% allocation + utilization + skills + over-allocation warnings"
+    raid: "Portfolio-level register, scoring, owner, mitigation, dependency links, escalation"
+    financials: "Deferred to Phase 2 (planned-budget attribute only)"
+    intake: "Form + configurable scoring + stage-gate approval"
+    reporting: "Prebuilt role-based dashboards + export"
+    integrations: "SSO (SAML/OIDC) MVP only; HR/ERP/Jira-DevOps deferred"
+    access: "RBAC (8 roles) + record-level scoping + audit trail"
+    tenancy: "Single enterprise"
+    outOfScope: "Task/kanban execution, timesheets, document management"
+    personas: "Yes (4 MVP)"
+    nfrFocus: "Security/RBAC + Audit + Availability + Reporting performance"
+    extensions: "security=enabled, resiliency=enabled, pbt=partial"
+  plan:
+    decomposition: "EXECUTE"
+    deliveryMode: "incremental"
+    foundation: "EXECUTE"
+    designExpandMode: "expanded"
+    depth: "standard"
+    riskTolerance: "balanced"
+    rollback: "moderate"
+    prototypeFirst: "no"
+    riskLevel: "Medium"
+    routing: "decomposition"
+  decomposition:
+    need: "yes"
+    architecture: "Modular Monolith"
+    strategy: "Domain-Driven"
+    units: "7 (identity-access, strategy-portfolio, project-execution, resource-management, risk-raid, demand-intake, reporting-dashboards)"
+    sharedKernel: "Foundation provides identity/RBAC/audit + shared types"
+    interaction: "In-process module APIs + shared data model; async events"
+    sequence: "Foundation+Identity → Strategy&Portfolio → Project Execution → Resource/Risk/Intake (parallel) → Reporting"
+  foundation:
+    language: "TypeScript (Node.js 20)"
+    frontend: "React (TypeScript) — separate repo"
+    monorepo: "pnpm workspaces + Turborepo (backend)"
+    repoStrategy: "Hybrid — backend monorepo + separate web repo; @epm/shared published"
+    foundationsLevel: "Standard"
+    auth: "OAuth2/OIDC + JWT, RBAC + record-scoping"
+    errorFormat: "RFC 7807 + shared code registry"
+    interUnitComms: "In-process module APIs + async domain events"
+    database: "Single PostgreSQL, schema per unit"
+    sharedTypes: "@epm/shared package (published)"
+    infraUnits: "Foundation (combined)"
+    cicd: "GitHub Actions"
+    branch: "GitHub Flow"
+    deployment: "Rolling"
+steering:
+  updatedBy:
+    product: [context, requirements]
+    tech: [context, foundation]
+    structure: [context, foundation]
+    team-workflow: [foundation]
+units:
+  - name: "foundation"
+    owner: "Sophon"
+    type: "infrastructure"
+    status: "completed"
+    phase: "completed"
+    completedPhases: [design, tasks, implement, build-test]
+    implementationMode: standard
+    implementation: { totalTasks: 35, completedTasks: 35, currentTask: "11.3", currentWave: null }
+    design:
+      expandMode: expanded
+    artifacts:
+      design:
+        status: "approved"
+        timestamp: "2026-07-07T10:05:00Z"
+        files: [design.md, design/components.md, design/data-model.md, design/api-spec.md, design/integration.md, design/implementation.md, design/nfr.md, design/correctness.md, design/functional-design.md, design/nfr-requirements.md, design/nfr-design.md, design/infrastructure.md]
+      tasks:
+        status: "approved"
+        timestamp: "2026-07-07T10:10:00Z"
+        files: [tasks.md]
+    decisions:
+      design:
+        framework: "NestJS"
+        orm: "Prisma (multi-schema)"
+        migrations: "Prisma Migrate"
+        validation: "Zod (@epm/shared)"
+        oidc: "openid-client + jose"
+        eventBus: "Lightweight typed in-process bus"
+        logging: "pino"
+        config: "Zod-validated env + platform secret store"
+        testing: "Vitest + Supertest + fast-check + Testcontainers"
+        pbt: "Yes — event round-trip, RFC7807 mapping, RBAC scope eval"
+        container: "Docker multi-stage + docker-compose"
+  - name: "identity-access"
+    owner: "Sophon"
+    status: "not-started"
+    phase: null
+    completedPhases: []
+    implementationMode: null
+    implementation: { totalTasks: 0, completedTasks: 0, currentTask: null, currentWave: null }
+    artifacts: {}
+    decisions: {}
+  - name: "strategy-portfolio"
+    owner: "Sophon"
+    status: "not-started"
+    phase: null
+    completedPhases: []
+    implementationMode: null
+    implementation: { totalTasks: 0, completedTasks: 0, currentTask: null, currentWave: null }
+    artifacts: {}
+    decisions: {}
+  - name: "project-execution"
+    owner: "Chavakorn"
+    status: "in-progress"
+    phase: "design"
+    completedPhases: []
+    implementationMode: null
+    implementation: { totalTasks: 0, completedTasks: 0, currentTask: null, currentWave: null }
+    artifacts: {}
+    decisions: {}
+  - name: "resource-management"
+    owner: "Chavakorn"
+    status: "not-started"
+    phase: null
+    completedPhases: []
+    implementationMode: null
+    implementation: { totalTasks: 0, completedTasks: 0, currentTask: null, currentWave: null }
+    artifacts: {}
+    decisions: {}
+  - name: "risk-raid"
+    owner: "Chavakorn"
+    status: "not-started"
+    phase: null
+    completedPhases: []
+    implementationMode: null
+    implementation: { totalTasks: 0, completedTasks: 0, currentTask: null, currentWave: null }
+    artifacts: {}
+    decisions: {}
+  - name: "demand-intake"
+    owner: "Sophon"
+    status: "not-started"
+    phase: null
+    completedPhases: []
+    implementationMode: null
+    implementation: { totalTasks: 0, completedTasks: 0, currentTask: null, currentWave: null }
+    artifacts: {}
+    decisions: {}
+  - name: "reporting-dashboards"
+    owner: "Chavakorn"
+    status: "not-started"
+    phase: null
+    completedPhases: []
+    implementationMode: null
+    implementation: { totalTasks: 0, completedTasks: 0, currentTask: null, currentWave: null }
+    artifacts: {}
+    decisions: {}

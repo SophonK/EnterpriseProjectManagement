@@ -1,0 +1,24 @@
+{
+  "name": "epm-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Enterprise Project & Portfolio Management (EPM/EPPM) platform — modular monolith backend",
+  "packageManager": "pnpm@9.7.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:int": "turbo run test:int",
+    "dev": "turbo run dev",
+    "db:migrate": "pnpm --filter @epm/db migrate",
+    "db:seed": "pnpm --filter @epm/db seed"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.5.0"
+  }
+}
