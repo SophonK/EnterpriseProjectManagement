@@ -1,14 +1,19 @@
 import { Controller, Get, Post, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { AppError } from "@epm/shared";
+import { randomUUID } from "node:crypto";
+import { AppError, type DomainEvent } from "@epm/shared";
 import { Public } from "./decorators.js";
 import { OidcService } from "./oidc.service.js";
+import { InProcessEventBus } from "../events/event-bus.js";
 
 const TEN_MIN = 10 * 60 * 1000;
 
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly oidc: OidcService) {}
+  constructor(
+    private readonly oidc: OidcService,
+    private readonly bus: InProcessEventBus,
+  ) {}
 
   /** Start the OIDC flow — redirect to the IdP with PKCE + state stored in cookies. */
   @Public()
@@ -36,7 +41,30 @@ export class AuthController {
     res.clearCookie("epm_state");
     res.clearCookie("epm_verifier");
     setSessionCookies(res, tokens.access_token, tokens.refresh_token);
+
+    // Announce a successful login so units (identity-access) can JIT-provision the user.
+    await this.publishLogin(tokens.claims());
+
     res.redirect("/");
+  }
+
+  private async publishLogin(claims: {
+    sub: string;
+    email?: unknown;
+    name?: unknown;
+  }): Promise<void> {
+    const event: DomainEvent<{ subject: string; email: string | null; name: string | null }> = {
+      eventId: randomUUID(),
+      eventType: "auth.login.succeeded",
+      occurredAt: new Date().toISOString(),
+      source: "foundation",
+      data: {
+        subject: claims.sub,
+        email: typeof claims.email === "string" ? claims.email : null,
+        name: typeof claims.name === "string" ? claims.name : null,
+      },
+    };
+    await this.bus.publish(event);
   }
 
   /** Renew the access token from the refresh cookie. */

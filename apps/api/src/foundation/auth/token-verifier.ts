@@ -1,7 +1,12 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional, Inject } from "@nestjs/common";
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import { AppError, ROLES, recordScopeSchema, type AuthContext, type RecordScope, type Role } from "@epm/shared";
 import { ConfigService } from "../config/config.service.js";
+import {
+  AUTH_CONTEXT_ENRICHER,
+  applyEnricher,
+  type AuthContextEnricher,
+} from "./auth-context-enricher.js";
 
 /**
  * Verifies IdP-issued JWT access tokens against the issuer's JWKS.
@@ -13,7 +18,10 @@ export class TokenVerifier {
   private readonly issuer: string;
   private readonly jwks: ReturnType<typeof createRemoteJWKSet>;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    @Optional() @Inject(AUTH_CONTEXT_ENRICHER) private readonly enricher?: AuthContextEnricher,
+  ) {
     this.issuer = config.get("OIDC_ISSUER");
     this.jwks = createRemoteJWKSet(new URL(".well-known/jwks.json", this.issuer), {
       cooldownDuration: 30_000,
@@ -21,11 +29,16 @@ export class TokenVerifier {
     });
   }
 
-  /** Verify a token and build the AuthContext, or throw AUTH_001. Fail closed. */
+  /**
+   * Verify a token and build the AuthContext, or throw AUTH_001. Fail closed.
+   * When an AuthContextEnricher is bound, roles/scopes come from the source of
+   * record (DB) rather than the token claims.
+   */
   async verify(token: string): Promise<AuthContext> {
     try {
       const { payload } = await jwtVerify(token, this.jwks, { issuer: this.issuer });
-      return toAuthContext(payload);
+      const base = toAuthContext(payload);
+      return applyEnricher(base, payload, this.enricher);
     } catch (err) {
       if (err instanceof AppError) throw err;
       throw AppError.unauthenticated("token verification failed");
