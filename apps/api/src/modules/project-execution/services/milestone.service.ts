@@ -27,7 +27,7 @@ export class MilestoneService {
     ctx: AuthContext,
     requestId: string,
   ): Promise<MilestoneDTO> {
-    await this.projectRepo.findByIdOrThrow(projectId); // existence + scope check
+    await this.projectRepo.findByIdScoped(projectId, ctx);
 
     const dto = await this.milestoneRepo.create({
       projectId,
@@ -47,7 +47,6 @@ export class MilestoneService {
       requestId,
     });
 
-    // Publish overdue event immediately if past due date
     if (dto.overdue) {
       await this.publishOverdue(dto);
     }
@@ -62,6 +61,7 @@ export class MilestoneService {
     ctx: AuthContext,
     requestId: string,
   ): Promise<MilestoneDTO> {
+    await this.projectRepo.findByIdScoped(projectId, ctx);
     const before = await this.milestoneRepo.findByIdOrThrow(id, projectId);
 
     const dto = await this.milestoneRepo.update(id, {
@@ -84,7 +84,6 @@ export class MilestoneService {
       requestId,
     });
 
-    // Publish overdue event if transition from not-overdue → overdue
     if (!before.overdue && dto.overdue) {
       await this.publishOverdue(dto);
     }
@@ -98,6 +97,7 @@ export class MilestoneService {
     ctx: AuthContext,
     requestId: string,
   ): Promise<void> {
+    await this.projectRepo.findByIdScoped(projectId, ctx);
     const before = await this.milestoneRepo.findByIdOrThrow(id, projectId);
     await this.milestoneRepo.delete(id, projectId);
     await this.auditService.record({
@@ -110,8 +110,18 @@ export class MilestoneService {
     });
   }
 
-  async listMilestones(projectId: string): Promise<MilestoneDTO[]> {
-    return this.milestoneRepo.findByProject(projectId);
+  // C-3 + m-4: scope check on parent project + publish events for newly-overdue milestones
+  async listMilestones(projectId: string, ctx: AuthContext): Promise<MilestoneDTO[]> {
+    await this.projectRepo.findByIdScoped(projectId, ctx);
+    const { milestones, newlyOverdueIds } = await this.milestoneRepo.findByProject(projectId);
+
+    // M-4: emit MILESTONE_OVERDUE for each milestone materialized during this read
+    for (const overdueId of newlyOverdueIds) {
+      const dto = milestones.find((m) => m.id === overdueId);
+      if (dto) await this.publishOverdue(dto);
+    }
+
+    return milestones;
   }
 
   private async publishOverdue(dto: MilestoneDTO): Promise<void> {

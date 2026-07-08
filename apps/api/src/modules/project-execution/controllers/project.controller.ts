@@ -14,6 +14,8 @@ import type { Request } from "express";
 import {
   CreateProjectSchema,
   UpdateProjectSchema,
+  type CreateProjectCommand,
+  type UpdateProjectCommand,
   type ProjectDTO,
   type ProjectFilter,
   type ProjectListDTO,
@@ -30,12 +32,10 @@ export class ProjectController {
   @Post()
   @RequirePermission("project:create")
   async createProject(
-    @Body(new ZodValidationPipe(CreateProjectSchema)) body: unknown,
+    @Body(new ZodValidationPipe(CreateProjectSchema)) body: CreateProjectCommand,
     @Req() req: Request,
   ): Promise<ProjectDTO> {
-    const cmd = body as import("@epm/shared").CreateProjectCommand;
-    const auth = getAuth(req)!;
-    return this.projectService.createProject(cmd, auth, getRequestId(req));
+    return this.projectService.createProject(body, getAuth(req)!, getRequestId(req));
   }
 
   @Get()
@@ -55,21 +55,21 @@ export class ProjectController {
     return this.projectService.listProjects(filter, getAuth(req)!);
   }
 
+  // C-1: pass auth so record scoping is enforced on single-record reads
   @Get(":id")
   @RequirePermission("project:read")
-  async getProject(@Param("id") id: string): Promise<ProjectDTO> {
-    return this.projectService.getProject(id);
+  async getProject(@Param("id") id: string, @Req() req: Request): Promise<ProjectDTO> {
+    return this.projectService.getProject(id, getAuth(req)!);
   }
 
   @Patch(":id")
   @RequirePermission("project:update")
   async updateProject(
     @Param("id") id: string,
-    @Body(new ZodValidationPipe(UpdateProjectSchema)) body: unknown,
+    @Body(new ZodValidationPipe(UpdateProjectSchema)) body: UpdateProjectCommand,
     @Req() req: Request,
   ): Promise<ProjectDTO> {
-    const cmd = body as import("@epm/shared").UpdateProjectCommand;
-    return this.projectService.updateProject(id, cmd, getAuth(req)!, getRequestId(req));
+    return this.projectService.updateProject(id, body, getAuth(req)!, getRequestId(req));
   }
 
   @Delete(":id")

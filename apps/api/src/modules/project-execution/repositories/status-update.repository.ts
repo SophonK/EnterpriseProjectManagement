@@ -11,26 +11,6 @@ export class StatusUpdateRepository extends BaseRepository {
     super(prisma);
   }
 
-  /** Append-only insert — never update or delete. */
-  async append(data: {
-    projectId: string;
-    status: ProjectStatus;
-    health: ProjectHealth;
-    note?: string | null;
-    recordedBy: string;
-  }): Promise<StatusUpdateDTO> {
-    const row = await this.prisma.statusUpdate.create({
-      data: {
-        projectId: data.projectId,
-        status: data.status,
-        health: data.health,
-        note: data.note ?? null,
-        recordedBy: data.recordedBy,
-      },
-    });
-    return toDTO(row);
-  }
-
   async findByProject(projectId: string): Promise<StatusUpdateDTO[]> {
     const rows = await this.prisma.statusUpdate.findMany({
       where: { projectId },

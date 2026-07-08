@@ -9,7 +9,7 @@ import {
 import { PrismaService } from "../../../foundation/db/prisma.service.js";
 import { ProjectService } from "../services/project.service.js";
 import { RollupService } from "../services/rollup.service.js";
-import type { DomainEvent, StatusChangedPayload } from "@epm/shared";
+import type { DomainEvent, StatusChangedPayload, Role } from "@epm/shared";
 
 /** DI token — override in tests with InMemoryIdempotencyLedger */
 export const EXECUTION_IDEMPOTENCY_LEDGER = Symbol("EXECUTION_IDEMPOTENCY_LEDGER");
@@ -48,7 +48,7 @@ export class ProjectExecutionEventSub implements OnModuleInit {
         async (event: DomainEvent<DemandPromotedPayload>) => {
           const systemCtx = {
             userId: "system",
-            roles: ["EPMO_DIRECTOR"] as const,
+            roles: ["EPMO_DIRECTOR"] as Role[],
             recordScopes: [],
           };
           await this.projectService.createProject(
@@ -76,7 +76,6 @@ export class ProjectExecutionEventSub implements OnModuleInit {
           event.data.portfolioId,
           event.data.programId,
         );
-        // Also recompute portfolio-level (programId=null) when event is program-scoped
         if (event.data.programId) {
           await this.rollupService.recomputeRollup(event.data.portfolioId, null);
         }

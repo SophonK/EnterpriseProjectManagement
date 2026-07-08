@@ -33,10 +33,10 @@ function makeProjectRepo(overrides: Partial<Record<string, unknown>> = {}) {
     create: vi.fn().mockResolvedValue(makeProjectDTO()),
     findById: vi.fn().mockResolvedValue(makeProjectDTO()),
     findByIdOrThrow: vi.fn().mockResolvedValue(makeProjectDTO()),
+    findByIdScoped: vi.fn().mockResolvedValue(makeProjectDTO()),
     findBySourceDemandId: vi.fn().mockResolvedValue(null),
     findMany: vi.fn().mockResolvedValue({ data: [], total: 0 }),
     update: vi.fn().mockResolvedValue(makeProjectDTO()),
-    updateStatusHealth: vi.fn().mockResolvedValue(undefined),
     archive: vi.fn().mockResolvedValue(undefined),
     existsByNameInPortfolio: vi.fn().mockResolvedValue(false),
     ...overrides,
@@ -45,10 +45,6 @@ function makeProjectRepo(overrides: Partial<Record<string, unknown>> = {}) {
 
 function makeStatusUpdateRepo() {
   return {
-    append: vi.fn().mockResolvedValue({
-      id: "su-1", projectId: "proj-1", status: "Active", health: "OnTrack",
-      note: null, recordedBy: "user-1", recordedAt: new Date().toISOString(),
-    }),
     findByProject: vi.fn().mockResolvedValue([]),
   };
 }
@@ -63,12 +59,31 @@ function makeAuditService() {
 
 const CTX: AuthContext = { userId: "user-1", roles: ["PROJECT_MANAGER"], recordScopes: [] };
 
+function makePrisma() {
+  // Minimal mock for $transaction used in updateStatusHealth
+  const statusRow = {
+    id: "su-1", projectId: "proj-1", status: "Active", health: "OnTrack",
+    note: null, recordedBy: "user-1", recordedAt: new Date(),
+  };
+  return {
+    $transaction: vi.fn().mockResolvedValue([statusRow, {}]),
+    statusUpdate: { create: vi.fn() },
+    project: { update: vi.fn() },
+  };
+}
+
+function makeRollupService() {
+  return { recomputeRollup: vi.fn().mockResolvedValue(undefined) };
+}
+
 function makeService(repoOverrides: Partial<Record<string, unknown>> = {}) {
   return new ProjectService(
     makeProjectRepo(repoOverrides) as never,
     makeStatusUpdateRepo() as never,
     makeEventBus() as never,
     makeAuditService() as never,
+    makePrisma() as never,
+    makeRollupService() as never,
   );
 }
 
@@ -152,9 +167,13 @@ const VALID_TRANSITIONS: Array<[ProjectStatus, ProjectStatus]> = [
   ["Active", "Cancelled"],
 ];
 
+// Self-transitions (X→X) are allowed as health-only updates (M-1 fix) — exclude them.
 const INVALID_TRANSITIONS: Array<[ProjectStatus, ProjectStatus]> = ALL_STATUSES.flatMap((from) =>
   ALL_STATUSES
-    .filter((to) => !VALID_TRANSITIONS.some(([f, t]) => f === from && t === to))
+    .filter((to) =>
+      to !== from &&
+      !VALID_TRANSITIONS.some(([f, t]) => f === from && t === to),
+    )
     .map((to): [ProjectStatus, ProjectStatus] => [from, to]),
 );
 
@@ -163,7 +182,7 @@ describe("PBT P5 — status transition completeness", () => {
     "invalid: %s → %s throws EXECUTION_003",
     async (from, to) => {
       const svc = makeService({
-        findByIdOrThrow: vi.fn().mockResolvedValue(makeProjectDTO({ status: from })),
+        findByIdScoped: vi.fn().mockResolvedValue(makeProjectDTO({ status: from })),
       });
       await expect(
         svc.updateStatusHealth("proj-1", { status: to, health: "OnTrack" }, CTX, "req-1"),
@@ -175,8 +194,7 @@ describe("PBT P5 — status transition completeness", () => {
     "valid: %s → %s succeeds",
     async (from, to) => {
       const svc = makeService({
-        findByIdOrThrow: vi.fn().mockResolvedValue(makeProjectDTO({ status: from })),
-        updateStatusHealth: vi.fn().mockResolvedValue(undefined),
+        findByIdScoped: vi.fn().mockResolvedValue(makeProjectDTO({ status: from })),
       });
       await expect(
         svc.updateStatusHealth("proj-1", { status: to, health: "OnTrack" }, CTX, "req-1"),
@@ -220,6 +238,7 @@ describe("ProjectService.createProject", () => {
     const svc = new ProjectService(
       projectRepo as never, statusUpdateRepo as never,
       eventBus as never, auditService as never,
+      makePrisma() as never, makeRollupService() as never,
     );
 
     await svc.createProject(
@@ -240,7 +259,7 @@ describe("ProjectService.createProject", () => {
 describe("ProjectService.updateProject", () => {
   it("throws EXECUTION_001 when patched dates produce invalid range", async () => {
     const svc = makeService({
-      findByIdOrThrow: vi.fn().mockResolvedValue(makeProjectDTO({
+      findByIdScoped: vi.fn().mockResolvedValue(makeProjectDTO({
         plannedStart: "2026-08-01",
         plannedEnd:   "2027-01-31",
       })),
@@ -260,6 +279,7 @@ describe("ProjectService.updateStatusHealth", () => {
     const svc = new ProjectService(
       projectRepo as never, makeStatusUpdateRepo() as never,
       eventBus as never, makeAuditService() as never,
+      makePrisma() as never, makeRollupService() as never,
     );
 
     await svc.updateStatusHealth("proj-1", { status: "Active", health: "AtRisk" }, CTX, "req-1");

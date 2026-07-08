@@ -38,6 +38,17 @@ function makePrisma() {
       create: vi.fn(),
       update: vi.fn(),
     },
+    // M-2 fix: RollupSnapshotRepository.upsert uses $transaction
+    $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+      // Pass through to the same prisma mock so findFirst/create/update work
+      return fn({
+        rollupSnapshot: {
+          findFirst: vi.fn(),
+          create: vi.fn(),
+          update: vi.fn(),
+        },
+      });
+    }),
   };
 }
 
@@ -123,9 +134,9 @@ describe("ProjectRepository", () => {
     expect(result).toBeNull();
   });
 
-  it("findByIdOrThrow — throws NOT_FOUND when missing", async () => {
+  it("findByIdOrThrow — throws EXECUTION_005 when missing", async () => {
     prisma.project.findFirst.mockResolvedValue(null);
-    await expect(repo.findByIdOrThrow("missing")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(repo.findByIdOrThrow("missing")).rejects.toMatchObject({ code: "EXECUTION_005" });
   });
 
   it("findBySourceDemandId — returns null when no match", async () => {
@@ -221,16 +232,17 @@ describe("MilestoneRepository", () => {
     };
     prisma.milestone.findMany.mockResolvedValue([staleRow]);
     prisma.milestone.updateMany.mockResolvedValue({ count: 1 });
-    const dtos = await repo.findByProject("proj-1");
-    expect(dtos[0].overdue).toBe(true);
+    const { milestones, newlyOverdueIds } = await repo.findByProject("proj-1");
+    expect(milestones[0].overdue).toBe(true);
+    expect(newlyOverdueIds).toContain("ms-3");
     expect(prisma.milestone.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ overdue: true }) }),
     );
   });
 
-  it("delete — throws NOT_FOUND if milestone not in project", async () => {
+  it("delete — throws EXECUTION_005 if milestone not in project", async () => {
     prisma.milestone.findFirst.mockResolvedValue(null);
-    await expect(repo.delete("ms-x", "proj-1")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(repo.delete("ms-x", "proj-1")).rejects.toMatchObject({ code: "EXECUTION_005" });
   });
 });
 
@@ -245,21 +257,6 @@ describe("StatusUpdateRepository", () => {
   beforeEach(() => {
     prisma = makePrisma();
     repo = new StatusUpdateRepository(prisma as never);
-  });
-
-  it("append — creates a new row with correct data", async () => {
-    const now = new Date();
-    prisma.statusUpdate.create.mockResolvedValue({
-      id: "su-1", projectId: "proj-1", status: "Active", health: "AtRisk",
-      note: "Delayed", recordedBy: "user-pm", recordedAt: now,
-    });
-    const dto = await repo.append({
-      projectId: "proj-1", status: "Active", health: "AtRisk",
-      note: "Delayed", recordedBy: "user-pm",
-    });
-    expect(dto.status).toBe("Active");
-    expect(dto.health).toBe("AtRisk");
-    expect(dto.note).toBe("Delayed");
   });
 
   it("findByProject — returns rows in desc order", async () => {
@@ -285,34 +282,51 @@ describe("RollupSnapshotRepository", () => {
   });
 
   it("upsert — creates and returns DTO when none exists", async () => {
-    prisma.rollupSnapshot.findFirst.mockResolvedValue(null);
-    prisma.rollupSnapshot.create.mockResolvedValue({
+    const createResult = {
       portfolioId: "port-1", programId: null,
       onTrackCount: 5, atRiskCount: 2, offTrackCount: 1, totalCount: 8,
       computedAt: new Date(),
-    });
+    };
+    // Override $transaction to use a tx with findFirst→null, create→result
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        rollupSnapshot: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue(createResult),
+          update: vi.fn(),
+        },
+      }),
+    );
     const dto = await repo.upsert({
       portfolioId: "port-1", programId: null,
       onTrackCount: 5, atRiskCount: 2, offTrackCount: 1, totalCount: 8,
     });
     expect(dto.totalCount).toBe(8);
     expect(dto.portfolioId).toBe("port-1");
-    expect(prisma.rollupSnapshot.create).toHaveBeenCalled();
   });
 
   it("upsert — updates existing snapshot when found", async () => {
-    prisma.rollupSnapshot.findFirst.mockResolvedValue({ id: "snap-1" });
-    prisma.rollupSnapshot.update.mockResolvedValue({
+    const updateResult = {
       portfolioId: "port-1", programId: null,
       onTrackCount: 6, atRiskCount: 1, offTrackCount: 1, totalCount: 8,
       computedAt: new Date(),
-    });
+    };
+    const txUpdate = vi.fn().mockResolvedValue(updateResult);
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        rollupSnapshot: {
+          findFirst: vi.fn().mockResolvedValue({ id: "snap-1" }),
+          update: txUpdate,
+          create: vi.fn(),
+        },
+      }),
+    );
     const dto = await repo.upsert({
       portfolioId: "port-1", programId: null,
       onTrackCount: 6, atRiskCount: 1, offTrackCount: 1, totalCount: 8,
     });
     expect(dto.onTrackCount).toBe(6);
-    expect(prisma.rollupSnapshot.update).toHaveBeenCalledWith(
+    expect(txUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "snap-1" } }),
     );
   });

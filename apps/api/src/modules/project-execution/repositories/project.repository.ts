@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { AppError } from "@epm/shared";
-import type { ProjectDTO, ProjectFilter, ProjectStatus, ProjectHealth } from "@epm/shared";
+import type { ProjectDTO, ProjectFilter } from "@epm/shared";
 import type { AuthContext } from "@epm/shared";
 import { BaseRepository } from "../../../foundation/db/base-repository.js";
 import type { PrismaService } from "../../../foundation/db/prisma.service.js";
@@ -55,13 +55,21 @@ export class ProjectRepository extends BaseRepository {
 
   async findByIdOrThrow(id: string): Promise<ProjectDTO> {
     const dto = await this.findById(id);
-    if (!dto) throw new AppError("NOT_FOUND", `Project ${id} not found`);
+    if (!dto) throw new AppError("EXECUTION_005", `Project ${id} not found`);
     return dto;
+  }
+
+  /** Scoped read — throws EXECUTION_005 if not found OR caller lacks access (info hiding). */
+  async findByIdScoped(id: string, ctx: AuthContext): Promise<ProjectDTO> {
+    const scopeWhere = buildScopeWhere(ctx, {});
+    const row = await this.prisma.project.findFirst({ where: { ...scopeWhere, id } });
+    if (!row) throw new AppError("EXECUTION_005", `Project ${id} not found`);
+    return toDTO(row);
   }
 
   async findBySourceDemandId(demandId: string): Promise<ProjectDTO | null> {
     const row = await this.prisma.project.findFirst({
-      where: { sourceDemandId: demandId },
+      where: { sourceDemandId: demandId, archivedAt: null },
     });
     return row ? toDTO(row) : null;
   }
@@ -113,20 +121,9 @@ export class ProjectRepository extends BaseRepository {
       });
       return toDTO(row);
     } catch (err) {
-      if (isPrismaNotFound(err)) throw new AppError("NOT_FOUND", `Project ${id} not found`);
+      if (isPrismaNotFound(err)) throw new AppError("EXECUTION_005", `Project ${id} not found`);
       throw err;
     }
-  }
-
-  async updateStatusHealth(
-    id: string,
-    status: ProjectStatus,
-    health: ProjectHealth,
-  ): Promise<void> {
-    await this.prisma.project.update({
-      where: { id },
-      data: { status, health, updatedAt: new Date() },
-    });
   }
 
   async archive(id: string): Promise<void> {
@@ -136,7 +133,7 @@ export class ProjectRepository extends BaseRepository {
         data: { archivedAt: new Date(), updatedAt: new Date() },
       });
     } catch (err) {
-      if (isPrismaNotFound(err)) throw new AppError("NOT_FOUND", `Project ${id} not found`);
+      if (isPrismaNotFound(err)) throw new AppError("EXECUTION_005", `Project ${id} not found`);
       throw err;
     }
   }
@@ -174,8 +171,6 @@ function buildScopeWhere(ctx: AuthContext, filter: ProjectFilter): Prisma.Projec
   if (isPortfolioManager) {
     const portfolioScope = ctx.recordScopes
       .filter((s) => s.type === "portfolio")
-      // Collect BOTH explicit ids and subtree roots (SR-MJ-1): a portfolio-subtree
-      // grant means "projects where portfolioId = subtreeRootId".
       .flatMap((s) => [...(s.ids ?? []), ...(s.subtreeRootId ? [s.subtreeRootId] : [])]);
     return { ...base, portfolioId: { in: portfolioScope } };
   }
@@ -184,11 +179,7 @@ function buildScopeWhere(ctx: AuthContext, filter: ProjectFilter): Prisma.Projec
   return { ...base, ownerUserId: ctx.userId };
 }
 
-type PrismaProjectRow = Awaited<ReturnType<typeof dummyFindFirst>>;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function dummyFindFirst(_p?: any) { return null as any; }
-
-function toDTO(row: {
+type ProjectRow = {
   id: string;
   name: string;
   description: string | null;
@@ -203,7 +194,9 @@ function toDTO(row: {
   archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-}): ProjectDTO {
+};
+
+function toDTO(row: ProjectRow): ProjectDTO {
   return {
     id: row.id,
     name: row.name,

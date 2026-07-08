@@ -13,6 +13,8 @@ import type { Request } from "express";
 import {
   AddMilestoneSchema,
   UpdateMilestoneSchema,
+  type AddMilestoneCommand,
+  type UpdateMilestoneCommand,
   type MilestoneDTO,
 } from "@epm/shared";
 import { RequirePermission } from "../../../foundation/auth/decorators.js";
@@ -28,17 +30,20 @@ export class MilestoneController {
   @RequirePermission("milestone:create")
   async addMilestone(
     @Param("projectId") projectId: string,
-    @Body(new ZodValidationPipe(AddMilestoneSchema)) body: unknown,
+    @Body(new ZodValidationPipe(AddMilestoneSchema)) body: AddMilestoneCommand,
     @Req() req: Request,
   ): Promise<MilestoneDTO> {
-    const cmd = body as import("@epm/shared").AddMilestoneCommand;
-    return this.milestoneService.addMilestone(projectId, cmd, getAuth(req)!, getRequestId(req));
+    return this.milestoneService.addMilestone(projectId, body, getAuth(req)!, getRequestId(req));
   }
 
+  // C-3: pass auth so scope check on parent project is enforced
   @Get()
   @RequirePermission("milestone:read")
-  async listMilestones(@Param("projectId") projectId: string): Promise<MilestoneDTO[]> {
-    return this.milestoneService.listMilestones(projectId);
+  async listMilestones(
+    @Param("projectId") projectId: string,
+    @Req() req: Request,
+  ): Promise<MilestoneDTO[]> {
+    return this.milestoneService.listMilestones(projectId, getAuth(req)!);
   }
 
   @Patch(":id")
@@ -46,11 +51,10 @@ export class MilestoneController {
   async updateMilestone(
     @Param("projectId") projectId: string,
     @Param("id") id: string,
-    @Body(new ZodValidationPipe(UpdateMilestoneSchema)) body: unknown,
+    @Body(new ZodValidationPipe(UpdateMilestoneSchema)) body: UpdateMilestoneCommand,
     @Req() req: Request,
   ): Promise<MilestoneDTO> {
-    const cmd = body as import("@epm/shared").UpdateMilestoneCommand;
-    return this.milestoneService.updateMilestone(id, projectId, cmd, getAuth(req)!, getRequestId(req));
+    return this.milestoneService.updateMilestone(id, projectId, body, getAuth(req)!, getRequestId(req));
   }
 
   @Delete(":id")

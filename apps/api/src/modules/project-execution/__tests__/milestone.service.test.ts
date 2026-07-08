@@ -10,7 +10,10 @@ import type { AuthContext, MilestoneDTO } from "@epm/shared";
 const CTX: AuthContext = { userId: "user-1", roles: ["PROJECT_MANAGER"], recordScopes: [] };
 
 function makeProjectRepo() {
-  return { findByIdOrThrow: vi.fn().mockResolvedValue({ id: "proj-1" }) };
+  return {
+    findByIdOrThrow: vi.fn().mockResolvedValue({ id: "proj-1" }),
+    findByIdScoped:  vi.fn().mockResolvedValue({ id: "proj-1" }),
+  };
 }
 
 function makeEventBus() {

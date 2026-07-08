@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import type { RollupSummaryDTO } from "@epm/shared";
 import { BaseRepository } from "../../../foundation/db/base-repository.js";
 import type { PrismaService } from "../../../foundation/db/prisma.service.js";
@@ -11,6 +12,11 @@ export class RollupSnapshotRepository extends BaseRepository {
     super(prisma);
   }
 
+  /**
+   * Atomic upsert by (portfolioId, programId).
+   * Uses REPEATABLE READ isolation so two concurrent callers serialize at the
+   * findFirst step — one will see the other's insert and proceed to update.
+   */
   async upsert(data: {
     portfolioId: string;
     programId: string | null;
@@ -27,21 +33,20 @@ export class RollupSnapshotRepository extends BaseRepository {
       computedAt: new Date(),
     };
 
-    // The compound unique (portfolioId, programId) includes a nullable column, so it
-    // cannot be used as a where-unique key. Do a nullable-safe find-then-update/create.
-    const existing = await this.prisma.rollupSnapshot.findFirst({
-      where: { portfolioId: data.portfolioId, programId: data.programId },
-      select: { id: true },
-    });
-
-    const row = existing
-      ? await this.prisma.rollupSnapshot.update({
-          where: { id: existing.id },
-          data: counts,
-        })
-      : await this.prisma.rollupSnapshot.create({
-          data: { portfolioId: data.portfolioId, programId: data.programId, ...counts },
+    const row = await this.prisma.$transaction(
+      async (tx) => {
+        const existing = await tx.rollupSnapshot.findFirst({
+          where: { portfolioId: data.portfolioId, programId: data.programId },
+          select: { id: true },
         });
+        return existing
+          ? tx.rollupSnapshot.update({ where: { id: existing.id }, data: counts })
+          : tx.rollupSnapshot.create({
+              data: { portfolioId: data.portfolioId, programId: data.programId, ...counts },
+            });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
 
     return toDTO(row);
   }

@@ -23,4 +23,9 @@ registerErrorCodes({
     title: "Duplicate project name in portfolio",
     type: "/errors/execution/duplicate",
   },
+  EXECUTION_005: {
+    status: 404,
+    title: "Resource not found",
+    type: "/errors/execution/not-found",
+  },
 });

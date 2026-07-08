@@ -16,8 +16,10 @@ import {
 } from "@epm/shared";
 import { EVENT_BUS, type EventBus } from "../../../foundation/events/event-bus.js";
 import { AuditService } from "../../../foundation/audit/audit.service.js";
+import { PrismaService } from "../../../foundation/db/prisma.service.js";
 import { ProjectRepository } from "../repositories/project.repository.js";
 import { StatusUpdateRepository } from "../repositories/status-update.repository.js";
+import { RollupService } from "./rollup.service.js";
 
 /** Status transition table: [from] → allowed [to] values */
 const VALID_TRANSITIONS: Record<ProjectStatus, ProjectStatus[]> = {
@@ -34,6 +36,8 @@ export class ProjectService {
     private readonly statusUpdateRepo: StatusUpdateRepository,
     @Inject(EVENT_BUS) private readonly eventBus: EventBus,
     private readonly auditService: AuditService,
+    private readonly prisma: PrismaService,
+    private readonly rollupService: RollupService,
   ) {}
 
   async createProject(
@@ -101,9 +105,8 @@ export class ProjectService {
     ctx: AuthContext,
     requestId: string,
   ): Promise<ProjectDTO> {
-    const before = await this.projectRepo.findByIdOrThrow(id);
+    const before = await this.projectRepo.findByIdScoped(id, ctx);
 
-    // Date range cross-validation against stored counterpart
     const effectiveStart = cmd.plannedStart ? new Date(cmd.plannedStart) : new Date(before.plannedStart);
     const effectiveEnd   = cmd.plannedEnd   ? new Date(cmd.plannedEnd)   : new Date(before.plannedEnd);
     if (effectiveEnd < effectiveStart) {
@@ -133,8 +136,9 @@ export class ProjectService {
   }
 
   async archiveProject(id: string, ctx: AuthContext, requestId: string): Promise<void> {
-    const before = await this.projectRepo.findByIdOrThrow(id);
+    const before = await this.projectRepo.findByIdScoped(id, ctx);
     await this.projectRepo.archive(id);
+
     await this.auditService.record({
       actorId: ctx.userId,
       action: "delete",
@@ -143,10 +147,30 @@ export class ProjectService {
       before,
       requestId,
     });
+
+    // m-5: publish archive event so downstream units can react
+    await this.eventBus.publish({
+      eventId: randomUUID(),
+      eventType: PROJECT_EXECUTION_EVENTS.PROJECT_ARCHIVED,
+      occurredAt: new Date().toISOString(),
+      source: "project-execution",
+      data: {
+        projectId: id,
+        portfolioId: before.portfolioId,
+        programId: before.programId,
+      },
+    });
+
+    // M-3: archived project must not skew the rollup
+    await this.rollupService.recomputeRollup(before.portfolioId, before.programId);
+    if (before.programId) {
+      await this.rollupService.recomputeRollup(before.portfolioId, null);
+    }
   }
 
-  async getProject(id: string): Promise<ProjectDTO> {
-    return this.projectRepo.findByIdOrThrow(id);
+  // C-1: scoped read — PROJECT_MANAGER can only read their own projects
+  async getProject(id: string, ctx: AuthContext): Promise<ProjectDTO> {
+    return this.projectRepo.findByIdScoped(id, ctx);
   }
 
   async listProjects(filter: ProjectFilter, ctx: AuthContext): Promise<ProjectListDTO> {
@@ -165,26 +189,45 @@ export class ProjectService {
     ctx: AuthContext,
     requestId: string,
   ): Promise<StatusUpdateDTO> {
-    const project = await this.projectRepo.findByIdOrThrow(id);
+    const project = await this.projectRepo.findByIdScoped(id, ctx);
 
-    // Enforce state machine
-    const allowed = VALID_TRANSITIONS[project.status as ProjectStatus] ?? [];
-    if (!allowed.includes(cmd.status)) {
-      throw new AppError(
-        "EXECUTION_003",
-        `Cannot transition project from "${project.status}" to "${cmd.status}"`,
-      );
+    // M-1: only validate transition when status actually changes
+    if (cmd.status !== project.status) {
+      const allowed = VALID_TRANSITIONS[project.status as ProjectStatus] ?? [];
+      if (!allowed.includes(cmd.status)) {
+        throw new AppError(
+          "EXECUTION_003",
+          `Cannot transition project from "${project.status}" to "${cmd.status}"`,
+        );
+      }
     }
 
-    // Persist status update (append-only) and update project columns atomically
-    const statusUpdate = await this.statusUpdateRepo.append({
-      projectId: id,
-      status: cmd.status,
-      health: cmd.health,
-      note: cmd.note ?? null,
-      recordedBy: ctx.userId,
-    });
-    await this.projectRepo.updateStatusHealth(id, cmd.status, cmd.health);
+    // C-2: atomically append StatusUpdate row + update Project columns
+    const [statusRow] = await this.prisma.$transaction([
+      this.prisma.statusUpdate.create({
+        data: {
+          projectId: id,
+          status: cmd.status,
+          health: cmd.health,
+          note: cmd.note ?? null,
+          recordedBy: ctx.userId,
+        },
+      }),
+      this.prisma.project.update({
+        where: { id },
+        data: { status: cmd.status, health: cmd.health, updatedAt: new Date() },
+      }),
+    ]);
+
+    const statusUpdate: StatusUpdateDTO = {
+      id: statusRow.id,
+      projectId: statusRow.projectId,
+      status: statusRow.status as ProjectStatus,
+      health: statusRow.health as ProjectHealth,
+      note: statusRow.note,
+      recordedBy: statusRow.recordedBy,
+      recordedAt: statusRow.recordedAt.toISOString(),
+    };
 
     await this.auditService.record({
       actorId: ctx.userId,
@@ -207,6 +250,7 @@ export class ProjectService {
         programId: project.programId,
         status: cmd.status,
         health: cmd.health,
+        previousStatus: project.status as ProjectStatus,
         previousHealth: project.health as ProjectHealth,
       },
     });
@@ -214,8 +258,9 @@ export class ProjectService {
     return statusUpdate;
   }
 
-  async getStatusHistory(id: string): Promise<StatusUpdateDTO[]> {
-    await this.projectRepo.findByIdOrThrow(id); // existence check
+  // C-1: scoped history — caller must have access to the parent project
+  async getStatusHistory(id: string, ctx: AuthContext): Promise<StatusUpdateDTO[]> {
+    await this.projectRepo.findByIdScoped(id, ctx);
     return this.statusUpdateRepo.findByProject(id);
   }
 }
