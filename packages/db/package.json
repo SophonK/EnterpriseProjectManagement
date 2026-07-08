@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "prisma generate",
     "generate": "prisma generate",
     "validate": "prisma validate",
     "format": "prisma format",
