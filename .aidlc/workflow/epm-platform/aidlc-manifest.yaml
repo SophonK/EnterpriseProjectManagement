@@ -238,9 +238,9 @@ units:
     owner: "Chavakorn"
     status: "in-progress"
     phase: "design"
-    completedPhases: [design]
+    completedPhases: [design, tasks]
     implementationMode: standard
-    implementation: { totalTasks: 0, completedTasks: 0, currentTask: null, currentWave: null }
+    implementation: { totalTasks: 34, completedTasks: 0, currentTask: null, currentWave: null }
     design:
       expandMode: expanded
     artifacts:
@@ -248,6 +248,10 @@ units:
         status: "approved"
         timestamp: "2026-07-09T00:00:00Z"
         files: [design.md, design/components.md, design/data-model.md, design/api-spec.md, design/integration.md, design/implementation.md, design/nfr.md, design/correctness.md, design/functional-design.md, design/nfr-requirements.md, design/nfr-design.md]
+      tasks:
+        status: "approved"
+        timestamp: "2026-07-09T00:00:00Z"
+        files: [tasks.md]
     decisions:
       design:
         overAllocCheck: "synchronous sum query on overlapping periods; publish ResourceOverAllocated event if >100%"
