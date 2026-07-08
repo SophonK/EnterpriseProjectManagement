@@ -213,9 +213,9 @@ units:
     owner: "Chavakorn"
     status: "completed"
     phase: "completed"
-    completedPhases: [design, tasks, implement]
-    implementationMode: autonomous
-    implementation: { totalTasks: 32, completedTasks: 32, currentTask: "8.6", currentWave: "Wave5-complete" }
+    completedPhases: [design, tasks, implement, build-test]
+    implementationMode: standard
+    implementation: { totalTasks: 32, completedTasks: 32, currentTask: "8.6", currentWave: null }
     artifacts:
       design:
         status: "approved"
@@ -236,13 +236,27 @@ units:
         pbt: "P1-P5: date-range, rollup math, milestone overdue, state transitions"
   - name: "resource-management"
     owner: "Chavakorn"
-    status: "not-started"
-    phase: null
-    completedPhases: []
-    implementationMode: null
+    status: "in-progress"
+    phase: "design"
+    completedPhases: [design]
+    implementationMode: standard
     implementation: { totalTasks: 0, completedTasks: 0, currentTask: null, currentWave: null }
-    artifacts: {}
-    decisions: {}
+    design:
+      expandMode: expanded
+    artifacts:
+      design:
+        status: "approved"
+        timestamp: "2026-07-09T00:00:00Z"
+        files: [design.md, design/components.md, design/data-model.md, design/api-spec.md, design/integration.md, design/implementation.md, design/nfr.md, design/correctness.md, design/functional-design.md, design/nfr-requirements.md, design/nfr-design.md]
+    decisions:
+      design:
+        overAllocCheck: "synchronous sum query on overlapping periods; publish ResourceOverAllocated event if >100%"
+        periodModel: "calendar-month buckets (periodStart = first day of month); normalised at service layer"
+        projectRef: "soft FK: projectId string; validated via ProjectService.getProject() at write time"
+        overAllocSave: "allowed with confirmOverAllocation=true; saved with overAllocatedConfirmed=true flag"
+        capacityUnit: "FTE % per period (0-100+); CapacityPeriod row overrides Resource.fteCapacity for that month"
+        utilizationBands: "Under <80%, Optimal 80-100%, Over >100%"
+        pbt: "P1 allocation sum commutative, P2 over-alloc detection complete, P3 band exhaustive, P4 normalisation idempotent"
   - name: "risk-raid"
     owner: "Chavakorn"
     status: "not-started"

@@ -5,7 +5,7 @@ This project uses AI-DLC skills for structured software specification and implem
 ## Current Workflow State
 
 - **Feature**: epm-platform
-- **Phase**: foundation ✅ + identity-access ✅ + project-execution ✅ merged to main. 4 units remain (strategy-portfolio, resource-management, risk-raid, demand-intake, reporting-dashboards).
+- **Phase**: next batch — resource-management (Chavakorn) · risk-raid (Chavakorn) · demand-intake (Sophon) — all at D4 design · project-execution COMPLETE (32/32)
 - **Language**: en
 
 ## Workflow Instructions
