@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@epm/config": "workspace:*",
+    "@epm/db": "workspace:*",
     "@types/cookie-parser": "^1.4.7",
     "@types/express": "^4.17.21",
     "@types/node": "^26.1.0",

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "postinstall": "prisma generate",
+    "build": "prisma generate",
     "generate": "prisma generate",
     "validate": "prisma validate",
     "format": "prisma format",
