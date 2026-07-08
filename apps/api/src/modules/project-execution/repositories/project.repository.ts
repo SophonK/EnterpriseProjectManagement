@@ -174,7 +174,9 @@ function buildScopeWhere(ctx: AuthContext, filter: ProjectFilter): Prisma.Projec
   if (isPortfolioManager) {
     const portfolioScope = ctx.recordScopes
       .filter((s) => s.type === "portfolio")
-      .flatMap((s) => s.ids ?? []);
+      // Collect BOTH explicit ids and subtree roots (SR-MJ-1): a portfolio-subtree
+      // grant means "projects where portfolioId = subtreeRootId".
+      .flatMap((s) => [...(s.ids ?? []), ...(s.subtreeRootId ? [s.subtreeRootId] : [])]);
     return { ...base, portfolioId: { in: portfolioScope } };
   }
 

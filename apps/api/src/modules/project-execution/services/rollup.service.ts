@@ -49,7 +49,7 @@ export class RollupService {
     portfolioId: string,
     programId: string | null,
   ): Promise<{ onTrackCount: number; atRiskCount: number; offTrackCount: number; totalCount: number }> {
-    const rows = await (this.prisma.project.groupBy as (args: unknown) => Promise<HealthCount[]>)({
+    const rows = await (this.prisma.project.groupBy as unknown as (args: unknown) => Promise<HealthCount[]>)({
       by: ["health"],
       where: {
         portfolioId,
