@@ -139,3 +139,7 @@
 **Action**: decision-gate
 **Artifacts**: units/foundation/decisions-design.md
 **Outcome**: D3 gate for foundation scaffold generated (11 open lib/framework questions; stack inherited from foundation.md). Awaiting answers. (Full entry in units/foundation/audit.md.)
+- [2026-07-08] strategy-portfolio: design (expanded) approved — 12 design files, autonomous
+- [2026-07-08] strategy-portfolio: implement COMPLETE (37/37 tasks, 70 unit tests green, 139/139 api suite) — autonomous
+- [2026-07-08] demand-intake: design (expanded) approved — 12 design files, autonomous
+- [2026-07-08] demand-intake: implement COMPLETE (34/34 tasks, 65 unit tests green, 204/204 api suite) — autonomous

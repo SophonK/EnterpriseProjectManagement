@@ -163,8 +163,8 @@ model Project {
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  milestones     Milestone[]
-  statusUpdates  StatusUpdate[]
+  milestones    Milestone[]
+  statusUpdates StatusUpdate[]
 
   @@index([portfolioId], name: "idx_project_portfolio")
   @@index([programId], name: "idx_project_program")
@@ -187,7 +187,7 @@ model Milestone {
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId], name: "idx_milestone_project")
   @@map("milestone")
@@ -204,7 +204,7 @@ model StatusUpdate {
   recordedBy String   @map("recorded_by") @db.Uuid
   recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
 
-  project    Project  @relation(fields: [projectId], references: [id])
+  project Project @relation(fields: [projectId], references: [id])
 
   @@index([projectId, recordedAt(sort: Desc)], name: "idx_status_update_project_time")
   @@map("status_update")
@@ -213,16 +213,278 @@ model StatusUpdate {
 
 /// Materialized roll-up snapshot per portfolio/program. Upserted on StatusChanged events.
 model RollupSnapshot {
-  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  portfolioId   String    @map("portfolio_id") @db.Uuid
-  programId     String?   @map("program_id") @db.Uuid
-  onTrackCount  Int       @default(0) @map("on_track_count")
-  atRiskCount   Int       @default(0) @map("at_risk_count")
-  offTrackCount Int       @default(0) @map("off_track_count")
-  totalCount    Int       @default(0) @map("total_count")
-  computedAt    DateTime  @map("computed_at") @db.Timestamptz(6)
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  portfolioId   String   @map("portfolio_id") @db.Uuid
+  programId     String?  @map("program_id") @db.Uuid
+  onTrackCount  Int      @default(0) @map("on_track_count")
+  atRiskCount   Int      @default(0) @map("at_risk_count")
+  offTrackCount Int      @default(0) @map("off_track_count")
+  totalCount    Int      @default(0) @map("total_count")
+  computedAt    DateTime @map("computed_at") @db.Timestamptz(6)
 
   @@unique([portfolioId, programId], name: "uq_rollup_portfolio_program")
   @@map("rollup_snapshot")
   @@schema("execution")
+}
+
+// ---------------------------------------------------------------------------
+// strategy-portfolio unit (`strategy` schema).
+// ---------------------------------------------------------------------------
+
+enum GoalStatus {
+  Active
+  Archived
+
+  @@schema("strategy")
+}
+
+enum PortfolioStatus {
+  Active
+  Archived
+
+  @@schema("strategy")
+}
+
+enum ProgramStatus {
+  Active
+  Archived
+
+  @@schema("strategy")
+}
+
+model StrategicGoal {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title       String     @db.VarChar(200)
+  description String
+  measure     String
+  status      GoalStatus @default(Active)
+  createdBy   String     @map("created_by") @db.Uuid
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  portfolioGoals PortfolioGoal[]
+  goalLinks      GoalLink[]
+
+  @@index([status], name: "idx_strategic_goal_status")
+  @@map("strategic_goal")
+  @@schema("strategy")
+}
+
+model Portfolio {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String          @db.VarChar(200)
+  description String?
+  ownerId     String          @map("owner_id") @db.Uuid
+  status      PortfolioStatus @default(Active)
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  programs       Program[]
+  portfolioGoals PortfolioGoal[]
+
+  @@index([ownerId], name: "idx_portfolio_owner")
+  @@map("portfolio")
+  @@schema("strategy")
+}
+
+model Program {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  portfolioId String        @map("portfolio_id") @db.Uuid
+  name        String        @db.VarChar(200)
+  description String?
+  status      ProgramStatus @default(Active)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@index([portfolioId], name: "idx_program_portfolio")
+  @@map("program")
+  @@schema("strategy")
+}
+
+/// M:N join between Portfolio and StrategicGoal. Idempotent via unique pair.
+model PortfolioGoal {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  portfolioId String   @map("portfolio_id") @db.Uuid
+  goalId      String   @map("goal_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  portfolio Portfolio     @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  goal      StrategicGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, goalId], name: "uq_portfolio_goal")
+  @@map("portfolio_goal")
+  @@schema("strategy")
+}
+
+/// Project↔Goal link. goalId is a real FK; projectId is a soft ref to execution.Project (NO cross-schema FK).
+model GoalLink {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  goalId    String   @map("goal_id") @db.Uuid
+  projectId String   @map("project_id") @db.Uuid
+  linkedBy  String   @map("linked_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  goal StrategicGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@unique([goalId, projectId], name: "uq_goal_link")
+  @@index([projectId], name: "idx_goal_link_project")
+  @@map("goal_link")
+  @@schema("strategy")
+}
+
+/// Local read-model projection of execution projects. All id columns are soft refs (NO FKs).
+model ProjectAlignmentView {
+  projectId     String   @id @map("project_id") @db.Uuid
+  name          String   @db.VarChar(200)
+  status        String   @db.VarChar(20)
+  plannedBudget Decimal? @map("planned_budget") @db.Decimal(18, 2)
+  portfolioId   String?  @map("portfolio_id") @db.Uuid
+  programId     String?  @map("program_id") @db.Uuid
+  aligned       Boolean  @default(false)
+  lastEventAt   DateTime @map("last_event_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status], name: "idx_project_alignment_status")
+  @@index([portfolioId], name: "idx_project_alignment_portfolio")
+  @@map("project_alignment_view")
+  @@schema("strategy")
+}
+
+// ---------------------------------------------------------------------------
+// demand-intake unit (`intake` schema).
+// ---------------------------------------------------------------------------
+
+enum DemandStatus {
+  Submitted
+  Screening
+  Evaluation
+  Approved
+  Promoted
+  Rejected
+
+  @@schema("intake")
+}
+
+enum IntakeGate {
+  Submitted
+  Screening
+  Evaluation
+  Approved
+
+  @@schema("intake")
+}
+
+enum GateOutcome {
+  Advanced
+  Rejected
+
+  @@schema("intake")
+}
+
+model DemandRequest {
+  id                String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title             String       @db.VarChar(200)
+  sponsor           String       @db.VarChar(200)
+  description       String
+  expectedValue     Decimal?     @map("expected_value") @db.Decimal(18, 2)
+  status            DemandStatus @default(Submitted)
+  currentGate       IntakeGate   @default(Submitted) @map("current_gate")
+  rejectionReason   String?      @map("rejection_reason")
+  submittedBy       String       @map("submitted_by") @db.Uuid
+  submittedAt       DateTime     @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  promotedProjectId String?      @map("promoted_project_id") @db.Uuid // soft ref → execution.project — NO FK
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  scoreCard     ScoreCard?
+  gateDecisions GateDecision[]
+
+  @@index([status], name: "idx_demand_request_status")
+  @@map("demand_request")
+  @@schema("intake")
+}
+
+model ScoringModel {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String   @db.VarChar(200)
+  version   Int
+  isActive  Boolean  @default(false) @map("is_active")
+  createdBy String   @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  criteria ScoringCriterion[]
+
+  @@index([isActive], name: "idx_scoring_model_active")
+  @@map("scoring_model")
+  @@schema("intake")
+}
+
+model ScoringCriterion {
+  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scoringModelId String  @map("scoring_model_id") @db.Uuid
+  name           String  @db.VarChar(200)
+  weight         Decimal @db.Decimal(18, 2)
+  maxScore       Int     @default(100) @map("max_score")
+  goalId         String? @map("goal_id") @db.Uuid // soft ref → strategy.strategic_goal — NO FK (D3-1)
+  sortOrder      Int     @default(0) @map("sort_order")
+
+  scoringModel ScoringModel @relation(fields: [scoringModelId], references: [id], onDelete: Cascade)
+
+  @@index([scoringModelId], name: "idx_scoring_criterion_model")
+  @@map("scoring_criterion")
+  @@schema("intake")
+}
+
+/// One active score card per demand request. scoringModelId is a soft ref to the model version scored (NO FK).
+model ScoreCard {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  demandRequestId String   @map("demand_request_id") @db.Uuid
+  scoringModelId  String   @map("scoring_model_id") @db.Uuid // soft ref → intake.scoring_model version — NO FK
+  weightedTotal   Decimal  @map("weighted_total") @db.Decimal(18, 2)
+  scoredBy        String   @map("scored_by") @db.Uuid
+  scoredAt        DateTime @default(now()) @map("scored_at") @db.Timestamptz(6)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  demandRequest DemandRequest    @relation(fields: [demandRequestId], references: [id], onDelete: Cascade)
+  scores        CriterionScore[]
+
+  @@unique([demandRequestId], name: "uq_score_card_demand")
+  @@map("score_card")
+  @@schema("intake")
+}
+
+model CriterionScore {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scoreCardId String   @map("score_card_id") @db.Uuid
+  criterionId String   @map("criterion_id") @db.Uuid // soft ref → intake.scoring_criterion — NO FK
+  rawScore    Int      @map("raw_score")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  scoreCard ScoreCard @relation(fields: [scoreCardId], references: [id], onDelete: Cascade)
+
+  @@unique([scoreCardId, criterionId], name: "uq_criterion_score_card_criterion")
+  @@map("criterion_score")
+  @@schema("intake")
+}
+
+/// Append-style audit of stage-gate transitions. toGate is null on reject.
+model GateDecision {
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  demandRequestId String      @map("demand_request_id") @db.Uuid
+  fromGate        IntakeGate  @map("from_gate")
+  toGate          IntakeGate? @map("to_gate")
+  decision        GateOutcome
+  reason          String?
+  decidedBy       String      @map("decided_by") @db.Uuid
+  decidedAt       DateTime    @default(now()) @map("decided_at") @db.Timestamptz(6)
+
+  demandRequest DemandRequest @relation(fields: [demandRequestId], references: [id], onDelete: Cascade)
+
+  @@index([demandRequestId], name: "idx_gate_decision_demand")
+  @@map("gate_decision")
+  @@schema("intake")
 }

@@ -9,7 +9,9 @@ import { AuditModule } from "./foundation/audit/audit.module.js";
 import { HealthModule } from "./foundation/health/health.module.js";
 import { IdentityAccessModule } from "./modules/identity-access/identity-access.module.js";
 import { RequestIdMiddleware } from "./foundation/logging/request-id.middleware.js";
+import { StrategyPortfolioModule } from "./modules/strategy-portfolio/strategy-portfolio.module.js";
 import { ProjectExecutionModule } from "./modules/project-execution/project-execution.module.js";
+import { DemandIntakeModule } from "./modules/demand-intake/demand-intake.module.js";
 
 /**
  * Composition root. Foundation modules (config, logging, db, auth, events, audit,
@@ -26,7 +28,13 @@ import { ProjectExecutionModule } from "./modules/project-execution/project-exec
     AuthModule,
     HealthModule,
     IdentityAccessModule,
+    // strategy-portfolio is registered BEFORE project-execution because execution
+    // soft-ref-validates its programId/portfolioId against this unit's in-process API.
+    StrategyPortfolioModule,
     ProjectExecutionModule,
+    // demand-intake publishes demand-intake.demand.* — registered AFTER project-execution,
+    // whose subscriber consumes demand-intake.demand.promoted to create the Project.
+    DemandIntakeModule,
   ],
   controllers: [],
   providers: [],
