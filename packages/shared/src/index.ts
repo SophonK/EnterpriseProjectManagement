@@ -10,3 +10,6 @@ export * from "./events/domain-event.js";
 export * from "./events/serialization.js";
 export * from "./events/identity-events.js";
 export * from "./types/identity.js";
+export * from "./types/project-execution.js";
+export * from "./errors/execution-error-codes.js";
+export * from "./events/project-execution-events.js";

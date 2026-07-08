@@ -61,4 +61,26 @@ describe("migration integration (Testcontainers Postgres)", () => {
     const names = rows.map((r) => r.table_name).sort();
     expect(names).toEqual(["audit_log", "outbox", "processed_events"]);
   });
+
+  it("creates the execution schema tables", async (ctx) => {
+    if (!dockerAvailable || !prisma) return ctx.skip();
+    const rows = await prisma.$queryRawUnsafe<{ table_name: string }[]>(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = 'execution' ORDER BY table_name`,
+    );
+    const names = rows.map((r) => r.table_name);
+    expect(names).toEqual(["milestone", "project", "rollup_snapshot", "status_update"]);
+  });
+
+  it("enforces planned_end >= planned_start on project", async (ctx) => {
+    if (!dockerAvailable || !prisma) return ctx.skip();
+    await expect(
+      prisma.$executeRawUnsafe(
+        `INSERT INTO execution.project
+           (id, name, owner_user_id, portfolio_id, status, health, planned_start, planned_end, created_by, updated_at)
+         VALUES (gen_random_uuid(), 'bad', gen_random_uuid(), gen_random_uuid(),
+                 'Open', 'OnTrack', '2026-12-01', '2026-01-01', gen_random_uuid(), now())`,
+      ),
+    ).rejects.toThrow();
+  });
 });
