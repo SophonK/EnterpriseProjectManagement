@@ -236,11 +236,11 @@ units:
         pbt: "P1-P5: date-range, rollup math, milestone overdue, state transitions"
   - name: "resource-management"
     owner: "Chavakorn"
-    status: "in-progress"
-    phase: "design"
-    completedPhases: [design, tasks]
+    status: "completed"
+    phase: "completed"
+    completedPhases: [design, tasks, implement, build-test]
     implementationMode: standard
-    implementation: { totalTasks: 34, completedTasks: 0, currentTask: null, currentWave: null }
+    implementation: { totalTasks: 34, completedTasks: 34, currentTask: null, currentWave: null }
     design:
       expandMode: expanded
     artifacts:
@@ -263,13 +263,32 @@ units:
         pbt: "P1 allocation sum commutative, P2 over-alloc detection complete, P3 band exhaustive, P4 normalisation idempotent"
   - name: "risk-raid"
     owner: "Chavakorn"
-    status: "not-started"
-    phase: null
-    completedPhases: []
-    implementationMode: null
-    implementation: { totalTasks: 0, completedTasks: 0, currentTask: null, currentWave: null }
-    artifacts: {}
-    decisions: {}
+    status: "completed"
+    phase: "completed"
+    completedPhases: [design, tasks, implement, build-test]
+    implementationMode: standard
+    implementation: { totalTasks: 22, completedTasks: 22, currentTask: null, currentWave: null }
+    design:
+      expandMode: expanded
+    artifacts:
+      design:
+        status: "approved"
+        timestamp: "2026-07-09T00:00:00Z"
+        files: [design.md, design/components.md, design/data-model.md, design/api-spec.md, design/integration.md, design/implementation.md, design/nfr.md, design/correctness.md, design/functional-design.md, design/nfr-requirements.md, design/nfr-design.md]
+      tasks:
+        status: "approved"
+        timestamp: "2026-07-09T00:00:00Z"
+        files: [tasks.md]
+    decisions:
+      design:
+        riskScoring: "severity × probability (1–5 each → 1–25 score)"
+        escalationThreshold: "score >= 15 (env RAID_ESCALATION_THRESHOLD); synchronous on write"
+        escalatedFlag: "boolean on RaidItem (orthogonal to status)"
+        statusMachine: "Open → InProgress (owner set) → Resolved/Closed/Accepted/Rejected (terminal)"
+        dependencyModel: "separate Dependency entity for cross-project links; RaidItem.type=Dependency for RAID register entries"
+        circularDepCheck: "direct A→B + B→A check on create (no graph traversal in MVP)"
+        projectRef: "soft FK; validated via ProjectService.getProject() → RISK_002"
+        pbt: "P1 score formula, P2 escalation completeness, P3 score bounds, P4 circular-dep order-independent"
   - name: "demand-intake"
     owner: "Sophon"
     status: "completed"
@@ -299,10 +318,21 @@ units:
         events: "publishes demand.submitted/approved/rejected/promoted; subscribes none"
   - name: "reporting-dashboards"
     owner: "Chavakorn"
-    status: "not-started"
-    phase: null
-    completedPhases: []
-    implementationMode: null
-    implementation: { totalTasks: 0, completedTasks: 0, currentTask: null, currentWave: null }
-    artifacts: {}
-    decisions: {}
+    status: "completed"
+    phase: "completed"
+    completedPhases: [design, tasks, implement, build-test]
+    implementationMode: standard
+    implementation: { totalTasks: 15, completedTasks: 15, currentTask: null, currentWave: null }
+    artifacts:
+      design:
+        status: "approved"
+        timestamp: "2026-07-09T15:30:00Z"
+      tasks:
+        status: "approved"
+        timestamp: "2026-07-09T15:30:00Z"
+    decisions:
+      design:
+        pattern: "Pure read-side aggregation — no writes, no events"
+        crossSchemaReads: "reporting unit reads cross-schema via PrismaService directly"
+        csvExport: "Pure toCsv() function; 1000 row limit (EXPORT_ROW_LIMIT)"
+        pbt: "fast-check P1 row count, P2 determinism, P3 column count"

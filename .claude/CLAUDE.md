@@ -5,7 +5,7 @@ This project uses AI-DLC skills for structured software specification and implem
 ## Current Workflow State
 
 - **Feature**: epm-platform
-- **Phase**: next batch — resource-management (Chavakorn) · risk-raid (Chavakorn) · demand-intake (Sophon) — all at D4 design · project-execution COMPLETE (32/32)
+- **Phase**: ALL UNITS COMPLETE · reporting-dashboards COMPLETE (15/15) · risk-raid COMPLETE (22/22) · resource-management COMPLETE (34/34)
 - **Language**: en
 
 ## Workflow Instructions

@@ -488,3 +488,141 @@ model GateDecision {
   @@map("gate_decision")
   @@schema("intake")
 }
+
+// ---------------------------------------------------------------------------
+// resource-management unit (`resource` schema)
+// ---------------------------------------------------------------------------
+
+/// Named resource pool (e.g. "Engineering", "Design").
+model ResourcePool {
+  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String     @unique @db.VarChar(200)
+  resources Resource[]
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("resource_pool")
+  @@schema("resource")
+}
+
+/// A person/resource with skills and FTE capacity.
+model Resource {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String           @db.VarChar(200)
+  email          String           @unique @db.VarChar(320)
+  poolId         String           @map("pool_id") @db.Uuid
+  fteCapacity    Decimal          @map("fte_capacity") @db.Decimal(5, 2)
+  overAllocated  Boolean          @default(false) @map("over_allocated")
+  deletedAt      DateTime?        @map("deleted_at") @db.Timestamptz(6)
+  createdBy      String           @map("created_by") @db.Uuid
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pool            ResourcePool     @relation(fields: [poolId], references: [id])
+  skills          Skill[]
+  capacityPeriods CapacityPeriod[]
+  allocations     Allocation[]
+
+  @@index([poolId], name: "idx_resource_pool")
+  @@map("resource")
+  @@schema("resource")
+}
+
+/// Skill tag on a resource (unique per resource+name).
+model Skill {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resourceId String   @map("resource_id") @db.Uuid
+  name       String   @db.VarChar(100)
+  level      String   @db.VarChar(20)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceId, name], name: "uq_skill_resource_name")
+  @@map("skill")
+  @@schema("resource")
+}
+
+/// Per-month capacity override for a resource (first-of-month date).
+model CapacityPeriod {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resourceId  String   @map("resource_id") @db.Uuid
+  periodStart DateTime @map("period_start") @db.Date
+  capacityPct Decimal  @map("capacity_pct") @db.Decimal(5, 2)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceId, periodStart], name: "uq_capacity_period_resource_month")
+  @@map("capacity_period")
+  @@schema("resource")
+}
+
+/// Percentage allocation of a resource to a project over a month range.
+model Allocation {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resourceId             String   @map("resource_id") @db.Uuid
+  projectId              String   @map("project_id") @db.VarChar(36)
+  periodStart            DateTime @map("period_start") @db.Date
+  periodEnd              DateTime @map("period_end") @db.Date
+  allocationPct          Decimal  @map("allocation_pct") @db.Decimal(5, 2)
+  overAllocatedConfirmed Boolean  @default(false) @map("over_allocated_confirmed")
+  createdBy              String   @map("created_by") @db.Uuid
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@index([resourceId, periodStart, periodEnd], name: "idx_allocation_resource_period")
+  @@index([projectId], name: "idx_allocation_project")
+  @@map("allocation")
+  @@schema("resource")
+}
+
+// ---------------------------------------------------------------------------
+// Unit 5: risk-raid (schema: risk)
+// ---------------------------------------------------------------------------
+
+model RaidItem {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId   String
+  type        String
+  title       String
+  description String?
+  severity    Int?
+  probability Int?
+  riskScore   Int?
+  status      String    @default("Open")
+  escalated   Boolean   @default(false)
+  ownerUserId String?
+  mitigation  String?
+  closedBy    String?
+  closedAt    DateTime? @db.Timestamptz
+  createdBy   String
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  @@index([projectId], name: "idx_raid_item_project")
+  @@index([escalated], name: "idx_raid_item_escalated")
+  @@index([status], name: "idx_raid_item_status")
+  @@map("raid_item")
+  @@schema("risk")
+}
+
+model Dependency {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fromProjectId  String
+  toProjectId    String
+  description    String
+  dependencyType String   @default("DependsOn")
+  createdBy      String
+  createdAt      DateTime @default(now()) @db.Timestamptz
+  updatedAt      DateTime @updatedAt @db.Timestamptz
+
+  @@unique([fromProjectId, toProjectId], name: "uq_dependency_pair")
+  @@index([fromProjectId], name: "idx_dependency_from")
+  @@index([toProjectId], name: "idx_dependency_to")
+  @@map("dependency")
+  @@schema("risk")
+}
