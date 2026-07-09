@@ -59,6 +59,17 @@ function makeAudit() {
   return { record: vi.fn().mockResolvedValue(undefined) };
 }
 
+// Interactive-transaction stub: $transaction invokes the callback with a tx client that also
+// answers the row-lock $queryRaw. The transactional services (StageGate/Promotion) publish
+// their event only AFTER this callback resolves, so the capturing bus still sees each event.
+const TX = { $queryRaw: vi.fn().mockResolvedValue([]) };
+
+function makePrisma() {
+  return {
+    $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(TX)),
+  };
+}
+
 describe("Phase 6 — demand-intake event publications (publisher-only, D3-7)", () => {
   it("submitIntake publishes demand.submitted with exact { demandId, title, submittedBy }", async () => {
     const repo = {
@@ -87,7 +98,7 @@ describe("Phase 6 — demand-intake event publications (publisher-only, D3-7)", 
 
   it("advanceGate into Approved publishes demand.approved with exact { demandId }", async () => {
     const repo = {
-      findByIdScoped: vi
+      findByIdScopedForUpdate: vi
         .fn()
         .mockResolvedValue(makeDemandDTO({ status: "Evaluation", currentGate: "Evaluation" })),
       updateStatusGate: vi
@@ -103,6 +114,7 @@ describe("Phase 6 — demand-intake event publications (publisher-only, D3-7)", 
       rbac as never,
       bus as never,
       makeAudit() as never,
+      makePrisma() as never,
     );
 
     await svc.advanceGate("demand-1", CTX, "req-1");
@@ -115,7 +127,7 @@ describe("Phase 6 — demand-intake event publications (publisher-only, D3-7)", 
 
   it("advanceGate NOT reaching Approved publishes no event", async () => {
     const repo = {
-      findByIdScoped: vi
+      findByIdScopedForUpdate: vi
         .fn()
         .mockResolvedValue(makeDemandDTO({ status: "Submitted", currentGate: "Submitted" })),
       updateStatusGate: vi
@@ -131,6 +143,7 @@ describe("Phase 6 — demand-intake event publications (publisher-only, D3-7)", 
       rbac as never,
       bus as never,
       makeAudit() as never,
+      makePrisma() as never,
     );
 
     await svc.advanceGate("demand-1", CTX, "req-1");
@@ -139,7 +152,7 @@ describe("Phase 6 — demand-intake event publications (publisher-only, D3-7)", 
 
   it("rejectGate publishes demand.rejected with exact { demandId, reason }", async () => {
     const repo = {
-      findByIdScoped: vi
+      findByIdScopedForUpdate: vi
         .fn()
         .mockResolvedValue(makeDemandDTO({ status: "Screening", currentGate: "Screening" })),
       updateStatusGate: vi
@@ -155,6 +168,7 @@ describe("Phase 6 — demand-intake event publications (publisher-only, D3-7)", 
       rbac as never,
       bus as never,
       makeAudit() as never,
+      makePrisma() as never,
     );
 
     await svc.rejectGate("demand-1", { reason: "Out of scope" }, CTX, "req-1");
@@ -168,13 +182,13 @@ describe("Phase 6 — demand-intake event publications (publisher-only, D3-7)", 
 
   it("promoteToProject publishes demand.promoted with the EXACT project-execution payload", async () => {
     const repo = {
-      findByIdScoped: vi
+      findByIdScopedForUpdate: vi
         .fn()
         .mockResolvedValue(makeDemandDTO({ status: "Approved", currentGate: "Approved", title: "New CRM" })),
       updateStatusGate: vi.fn().mockResolvedValue(makeDemandDTO({ status: "Promoted" })),
     };
     const { bus, published } = makeCapturingBus();
-    const svc = new PromotionService(repo as never, bus as never, makeAudit() as never);
+    const svc = new PromotionService(repo as never, bus as never, makeAudit() as never, makePrisma() as never);
 
     await svc.promoteToProject(
       "demand-1",
@@ -206,13 +220,13 @@ describe("Phase 6 — demand-intake event publications (publisher-only, D3-7)", 
 
   it("promoteToProject defaults optional programId / plannedBudget to null", async () => {
     const repo = {
-      findByIdScoped: vi
+      findByIdScopedForUpdate: vi
         .fn()
         .mockResolvedValue(makeDemandDTO({ status: "Approved", currentGate: "Approved", title: "New CRM" })),
       updateStatusGate: vi.fn().mockResolvedValue(makeDemandDTO({ status: "Promoted" })),
     };
     const { bus, published } = makeCapturingBus();
-    const svc = new PromotionService(repo as never, bus as never, makeAudit() as never);
+    const svc = new PromotionService(repo as never, bus as never, makeAudit() as never, makePrisma() as never);
 
     await svc.promoteToProject(
       "demand-1",

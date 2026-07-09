@@ -51,13 +51,36 @@ export class DemandRequestRepository extends BaseRepository {
   }
 
   /**
-   * Record-scoped list: EPMO Director sees all requests, everyone else only their
-   * own submissions (`submittedBy`). Newest first.
+   * Read-for-update: the same scoped read as `findByIdScoped`, but taken inside a caller's
+   * transaction after a pessimistic `SELECT ... FOR UPDATE` row lock on the demand row
+   * (REL-DI-03 / SEC-DI-05). Gate / promote / score mutations call this first so two
+   * concurrent transactions cannot double-advance the same request: the second blocks on the
+   * lock until the first commits, then re-reads the (now updated) status and fails its
+   * transition check. Throws DEMAND_002 when the row does not exist or is out of scope.
    */
-  async findManyScoped(ctx: AuthContext): Promise<DemandRequestDTO[]> {
+  async findByIdScopedForUpdate(
+    id: string,
+    ctx: AuthContext,
+    tx: Prisma.TransactionClient,
+  ): Promise<DemandRequestDTO> {
+    await tx.$queryRaw`SELECT id FROM "intake"."demand_request" WHERE "id" = ${id}::uuid FOR UPDATE`;
     const scopeWhere = buildScopeWhere(ctx);
+    const row = await tx.demandRequest.findFirst({ where: { ...scopeWhere, id } });
+    if (!row) throw new AppError("DEMAND_002", `Demand request ${id} not found`);
+    return toDTO(row);
+  }
+
+  /**
+   * Record-scoped list: EPMO Director sees all requests, everyone else only their
+   * own submissions (`submittedBy`). Newest first. An optional `status` narrows the
+   * result to a single DemandStatus (api-spec `?status=`).
+   */
+  async findManyScoped(ctx: AuthContext, status?: DemandStatus): Promise<DemandRequestDTO[]> {
+    const scopeWhere = buildScopeWhere(ctx);
+    const where: Prisma.DemandRequestWhereInput =
+      status !== undefined ? { ...scopeWhere, status } : scopeWhere;
     const rows = await this.prisma.demandRequest.findMany({
-      where: scopeWhere,
+      where,
       orderBy: { submittedAt: "desc" },
     });
     return rows.map(toDTO);
@@ -78,7 +101,9 @@ export class DemandRequestRepository extends BaseRepository {
       rejectionReason?: string | null;
       promotedProjectId?: string | null;
     },
+    tx?: Prisma.TransactionClient,
   ): Promise<DemandRequestDTO> {
+    const client = tx ?? this.prisma;
     const updateData: Prisma.DemandRequestUpdateInput = {
       status: data.status,
       updatedAt: new Date(),
@@ -88,7 +113,7 @@ export class DemandRequestRepository extends BaseRepository {
     if (data.promotedProjectId !== undefined) updateData.promotedProjectId = data.promotedProjectId;
 
     try {
-      const row = await this.prisma.demandRequest.update({ where: { id }, data: updateData });
+      const row = await client.demandRequest.update({ where: { id }, data: updateData });
       return toDTO(row);
     } catch (err) {
       if (isPrismaNotFound(err)) throw new AppError("DEMAND_002", `Demand request ${id} not found`);

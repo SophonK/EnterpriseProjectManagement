@@ -19,16 +19,21 @@ export class ScoreCardRepository extends BaseRepository {
    * `CriterionScore` rows are deleted and the new set inserted, so the persisted scores
    * always reflect the latest submission.
    */
-  async upsert(data: {
-    demandRequestId: string;
-    scoringModelId: string;
-    weightedTotal: number;
-    scoredBy: string;
-    scores: Array<{ criterionId: string; rawScore: number }>;
-  }): Promise<ScoreCardDTO> {
+  async upsert(
+    data: {
+      demandRequestId: string;
+      scoringModelId: string;
+      weightedTotal: number;
+      scoredBy: string;
+      scores: Array<{ criterionId: string; rawScore: number }>;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<ScoreCardDTO> {
     const weightedTotal = new Prisma.Decimal(data.weightedTotal);
 
-    return this.prisma.$transaction(async (tx) => {
+    // When the caller supplies a transaction client, reuse it so the card + criterion-score
+    // rows commit atomically with the caller's other writes; otherwise open a local one.
+    const run = async (tx: Prisma.TransactionClient): Promise<ScoreCardDTO> => {
       const card = await tx.scoreCard.upsert({
         where: { demandRequestId: data.demandRequestId },
         create: {
@@ -63,7 +68,9 @@ export class ScoreCardRepository extends BaseRepository {
         orderBy: { createdAt: "asc" },
       });
       return cardToDTO(card, scores);
-    });
+    };
+
+    return tx ? run(tx) : this.prisma.$transaction(run);
   }
 
   async findByRequest(demandRequestId: string): Promise<ScoreCardDTO | null> {

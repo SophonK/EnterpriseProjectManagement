@@ -40,7 +40,8 @@ export class GoalLinkService {
 
     const links: GoalLinkDTO[] = [];
     for (const goalId of goalIds) {
-      const exists = await this.goalRepo.existsById(goalId);
+      // Only Active goals may be freshly linked — an Archived (or missing) goal is rejected.
+      const exists = await this.goalRepo.existsActiveById(goalId);
       if (!exists) throw new AppError("STRATEGY_002", `Strategic goal ${goalId} not found`);
       links.push(await this.goalLinkRepo.upsertLink(goalId, projectId, linkedBy));
     }
@@ -69,7 +70,11 @@ export class GoalLinkService {
   }
 
   async unlinkGoal(id: string, ctx: AuthContext, requestId: string): Promise<void> {
-    await this.goalLinkRepo.delete(id); // STRATEGY_006 if missing
+    const projectId = await this.goalLinkRepo.delete(id); // STRATEGY_006 if missing
+
+    // BR-103/BR-104: removing a link can flip the project to unaligned — recompute so a
+    // project whose last link was removed becomes unaligned and (if active) is flagged.
+    await this.alignmentService.evaluateAlignment(projectId);
 
     await this.auditService.record({
       actorId: ctx.userId,

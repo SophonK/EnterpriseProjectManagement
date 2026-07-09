@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import type { AuthContext } from "@epm/shared";
 import { BaseRepository } from "../../../foundation/db/base-repository.js";
 import type { PrismaService } from "../../../foundation/db/prisma.service.js";
 
@@ -42,8 +43,9 @@ export class ProjectAlignmentViewRepository extends BaseRepository {
 
   /**
    * Upsert the projection by `projectId`, guarded by `lastEventAt` for out-of-order /
-   * duplicate tolerance (REL-SP-02): the write is applied only when the incoming event
-   * timestamp is `>=` the stored `lastEventAt`; a strictly older (stale/reordered) event
+   * duplicate tolerance (REL-SP-02, functional-design invariant #3): the write is applied
+   * only when the incoming event timestamp is strictly newer (`>`) than the stored
+   * `lastEventAt`; an event that is not newer (equal or older, i.e. stale/reordered/duplicate)
    * is a no-op. The `aligned` flag is owned by `setAligned` and never touched here.
    * Returns `true` when the projection was written, `false` when the event was stale.
    */
@@ -66,8 +68,9 @@ export class ProjectAlignmentViewRepository extends BaseRepository {
         where: { projectId: data.projectId },
         select: { lastEventAt: true },
       });
-      // Apply only if incoming ts >= stored ts; a strictly older event is stale.
-      if (existing && lastEventAt < existing.lastEventAt) return false;
+      // Invariant #3 (functional-design): an event NOT NEWER than the stored ts is ignored.
+      // Apply only when incoming ts is strictly greater; equal or older is a stale no-op.
+      if (existing && lastEventAt <= existing.lastEventAt) return false;
 
       await tx.projectAlignmentView.upsert({
         where: { projectId: data.projectId },
@@ -141,13 +144,34 @@ export class ProjectAlignmentViewRepository extends BaseRepository {
   }
 
   /**
+   * Record-scope for investment-mix aggregation (functional-design:155): reads are
+   * record-scoped for non-Director. Returns `null` for an EPMO Director (unfiltered — sees
+   * every portfolio), otherwise the ids of the portfolios the caller owns. An empty array
+   * means the caller owns nothing, so the aggregation yields no rows.
+   */
+  private async scopedPortfolioIds(ctx: AuthContext): Promise<string[] | null> {
+    if (ctx.roles.includes("EPMO_DIRECTOR")) return null;
+    const owned = await this.prisma.portfolio.findMany({
+      where: { ownerId: ctx.userId },
+      select: { id: true },
+    });
+    return owned.map((p) => p.id);
+  }
+
+  /**
    * Investment mix grouped by portfolio (US-009): per-portfolio project count and
    * `SUM(plannedBudget)` (null budgets treated as 0). Rows with no portfolio are excluded.
+   * Record-scoped (functional-design:155): a non-Director only sees portfolios they own;
+   * an EPMO Director sees all.
    */
-  async aggregateByPortfolio(): Promise<MixGroup[]> {
+  async aggregateByPortfolio(ctx: AuthContext): Promise<MixGroup[]> {
+    const ownedIds = await this.scopedPortfolioIds(ctx);
+    const where: Prisma.ProjectAlignmentViewWhereInput =
+      ownedIds === null ? { portfolioId: { not: null } } : { portfolioId: { in: ownedIds } };
+
     const groups = await this.prisma.projectAlignmentView.groupBy({
       by: ["portfolioId"],
-      where: { portfolioId: { not: null } },
+      where,
       _count: { projectId: true },
       _sum: { plannedBudget: true },
     });
@@ -163,16 +187,24 @@ export class ProjectAlignmentViewRepository extends BaseRepository {
    * soft `projectId` (no cross-schema FK, so aggregated in-process). A project linked to
    * N goals contributes to N goal-groups by design (per-link expansion, P1). Null budgets
    * are treated as 0; links whose project is not in the projection are skipped.
+   * Record-scoped (functional-design:155): a non-Director only counts projects whose
+   * `portfolioId` is one they own; an EPMO Director counts all.
    */
-  async aggregateByGoal(): Promise<MixGroup[]> {
+  async aggregateByGoal(ctx: AuthContext): Promise<MixGroup[]> {
+    const ownedIds = await this.scopedPortfolioIds(ctx);
+
     const links = await this.prisma.goalLink.findMany({
       select: { goalId: true, projectId: true },
     });
     if (links.length === 0) return [];
 
     const projectIds = [...new Set(links.map((l) => l.projectId))];
+    const where: Prisma.ProjectAlignmentViewWhereInput =
+      ownedIds === null
+        ? { projectId: { in: projectIds } }
+        : { projectId: { in: projectIds }, portfolioId: { in: ownedIds } };
     const views = await this.prisma.projectAlignmentView.findMany({
-      where: { projectId: { in: projectIds } },
+      where,
       select: { projectId: true, plannedBudget: true },
     });
     const budgetByProject = new Map<string, number>(

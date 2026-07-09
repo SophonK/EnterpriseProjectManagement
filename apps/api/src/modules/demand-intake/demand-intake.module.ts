@@ -74,8 +74,9 @@ export class DemandIntakeModule {
     );
 
     // Portfolio Manager — submit intake, score, advance/reject gates, promote; record-scoped
-    // to own submissions. Holds the screening + evaluation gate permissions but NOT the
-    // final approval gate (separation of duties) and NOT scoring-model configuration.
+    // to own submissions. Holds all three per-gate permissions incl. the final approval gate
+    // (components.md Permission Matrix + api-spec grant PORTFOLIO_MANAGER `intake-gate:approval`);
+    // NOT scoring-model configuration (Director-only).
     this.rbac.grant(
       "PORTFOLIO_MANAGER",
       "intake:request:submit",
@@ -85,9 +86,10 @@ export class DemandIntakeModule {
       "intake:request:reject",
       "intake:request:promote",
       "intake:scoring-model:read",
-      // Per-gate permissions (D3-4).
+      // Per-gate permissions (D3-4) — PM holds all three, incl. final approval.
       "intake-gate:screening",
       "intake-gate:evaluation",
+      "intake-gate:approval",
     );
   }
 }

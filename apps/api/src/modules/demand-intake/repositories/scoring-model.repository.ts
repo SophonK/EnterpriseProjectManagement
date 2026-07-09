@@ -31,8 +31,9 @@ export class ScoringModelRepository extends BaseRepository {
   async createWithCriteria(
     model: { name: string; createdBy: string },
     criteria: CriterionInput[],
+    tx?: Prisma.TransactionClient,
   ): Promise<ScoringModelDTO> {
-    return this.prisma.$transaction(async (tx) => {
+    const run = async (tx: Prisma.TransactionClient): Promise<ScoringModelDTO> => {
       const latest = await tx.scoringModel.findFirst({
         orderBy: { version: "desc" },
         select: { version: true },
@@ -66,7 +67,9 @@ export class ScoringModelRepository extends BaseRepository {
         orderBy: { sortOrder: "asc" },
       });
       return modelToDTO(created, rows);
-    });
+    };
+
+    return tx ? run(tx) : this.prisma.$transaction(run);
   }
 
   /**
@@ -74,23 +77,25 @@ export class ScoringModelRepository extends BaseRepository {
    * exactly one is active (single-active invariant, D3-3). Throws DEMAND_003 if the
    * target model does not exist.
    */
-  async activate(modelId: string): Promise<ScoringModelDTO> {
-    try {
-      return await this.prisma.$transaction(async (tx) => {
-        await tx.scoringModel.updateMany({
-          where: { id: { not: modelId }, isActive: true },
-          data: { isActive: false },
-        });
-        const updated = await tx.scoringModel.update({
-          where: { id: modelId },
-          data: { isActive: true, updatedAt: new Date() },
-        });
-        const criteria = await tx.scoringCriterion.findMany({
-          where: { scoringModelId: modelId },
-          orderBy: { sortOrder: "asc" },
-        });
-        return modelToDTO(updated, criteria);
+  async activate(modelId: string, tx?: Prisma.TransactionClient): Promise<ScoringModelDTO> {
+    const run = async (tx: Prisma.TransactionClient): Promise<ScoringModelDTO> => {
+      await tx.scoringModel.updateMany({
+        where: { id: { not: modelId }, isActive: true },
+        data: { isActive: false },
       });
+      const updated = await tx.scoringModel.update({
+        where: { id: modelId },
+        data: { isActive: true, updatedAt: new Date() },
+      });
+      const criteria = await tx.scoringCriterion.findMany({
+        where: { scoringModelId: modelId },
+        orderBy: { sortOrder: "asc" },
+      });
+      return modelToDTO(updated, criteria);
+    };
+
+    try {
+      return tx ? await run(tx) : await this.prisma.$transaction(run);
     } catch (err) {
       if (isPrismaNotFound(err)) throw new AppError("DEMAND_003", `Scoring model ${modelId} not found`);
       throw err;

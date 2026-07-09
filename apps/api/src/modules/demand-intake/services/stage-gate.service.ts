@@ -12,6 +12,7 @@ import {
 } from "@epm/shared";
 import { EVENT_BUS, type EventBus } from "../../../foundation/events/event-bus.js";
 import { AuditService } from "../../../foundation/audit/audit.service.js";
+import { PrismaService } from "../../../foundation/db/prisma.service.js";
 import { RbacRegistry } from "../../../foundation/auth/rbac.registry.js";
 import { DemandRequestRepository } from "../repositories/demand-request.repository.js";
 import { GateDecisionRepository } from "../repositories/gate-decision.repository.js";
@@ -42,6 +43,7 @@ export class StageGateService {
     private readonly rbac: RbacRegistry,
     @Inject(EVENT_BUS) private readonly eventBus: EventBus,
     private readonly auditService: AuditService,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -56,35 +58,61 @@ export class StageGateService {
     ctx: AuthContext,
     requestId: string,
   ): Promise<DemandRequestDTO> {
-    const request = await this.demandRepo.findByIdScoped(demandRequestId, ctx); // DEMAND_002
+    // REL-DI-03 / SEC-DI-05: read-for-update (row lock) + illegal-transition/permission checks
+    // + GateDecision + status change + audit all commit atomically in ONE transaction. The
+    // fail-closed checks run BEFORE any write, so an illegal advance never mutates; the row lock
+    // serializes concurrent advances so the same request cannot be double-advanced.
+    const { updated, approved } = await this.prisma.$transaction(async (tx) => {
+      const request = await this.demandRepo.findByIdScopedForUpdate(demandRequestId, ctx, tx); // DEMAND_002
 
-    if (request.status === "Rejected" || request.status === "Promoted") {
-      throw new AppError("DEMAND_005", `cannot advance from terminal status ${request.status}`);
-    }
+      if (request.status === "Rejected" || request.status === "Promoted") {
+        throw new AppError("DEMAND_005", `cannot advance from terminal status ${request.status}`);
+      }
 
-    const next = this.nextGate(request.currentGate);
-    if (next === null) {
-      throw new AppError("DEMAND_005", `illegal advance from ${request.currentGate}`);
-    }
+      const next = this.nextGate(request.currentGate);
+      if (next === null) {
+        throw new AppError("DEMAND_005", `illegal advance from ${request.currentGate}`);
+      }
 
-    if (!this.rbac.permitted(ctx.roles, GATE_PERMISSION[next])) {
-      throw AppError.forbidden(`missing per-gate permission for ${next}`);
-    }
+      if (!this.rbac.permitted(ctx.roles, GATE_PERMISSION[next])) {
+        throw AppError.forbidden(`missing per-gate permission for ${next}`);
+      }
 
-    await this.gateDecisionRepo.append({
-      demandRequestId,
-      fromGate: request.currentGate,
-      toGate: next,
-      decision: "Advanced",
-      decidedBy: ctx.userId,
+      await this.gateDecisionRepo.append(
+        {
+          demandRequestId,
+          fromGate: request.currentGate,
+          toGate: next,
+          decision: "Advanced",
+          decidedBy: ctx.userId,
+        },
+        tx,
+      );
+
+      const updated = await this.demandRepo.updateStatusGate(
+        demandRequestId,
+        { status: next, currentGate: next },
+        tx,
+      );
+
+      await this.auditService.record(
+        {
+          actorId: ctx.userId,
+          action: "update",
+          entityType: "demand-request",
+          entityId: demandRequestId,
+          after: updated,
+          requestId,
+        },
+        tx,
+      );
+
+      return { updated, approved: next === "Approved" };
     });
 
-    const updated = await this.demandRepo.updateStatusGate(demandRequestId, {
-      status: next,
-      currentGate: next,
-    });
-
-    if (next === "Approved") {
+    // Publish only after the state change has committed (in-process subscribers must not see
+    // an event for a transaction that rolled back).
+    if (approved) {
       await this.eventBus.publish({
         eventId: randomUUID(),
         eventType: DEMAND_INTAKE_EVENTS.DEMAND_APPROVED,
@@ -93,15 +121,6 @@ export class StageGateService {
         data: { demandId: demandRequestId },
       });
     }
-
-    await this.auditService.record({
-      actorId: ctx.userId,
-      action: "update",
-      entityType: "demand-request",
-      entityId: demandRequestId,
-      after: updated,
-      requestId,
-    });
 
     return updated;
   }
@@ -119,27 +138,49 @@ export class StageGateService {
     ctx: AuthContext,
     requestId: string,
   ): Promise<DemandRequestDTO> {
-    const request = await this.demandRepo.findByIdScoped(demandRequestId, ctx); // DEMAND_002
+    // Same atomic, fail-closed pattern as advanceGate: row lock + validation before any write,
+    // then GateDecision + status change + audit in ONE transaction (REL-DI-03).
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const request = await this.demandRepo.findByIdScopedForUpdate(demandRequestId, ctx, tx); // DEMAND_002
 
-    if (!ACTIVE_STATUSES.includes(request.status as (typeof ACTIVE_STATUSES)[number])) {
-      throw new AppError("DEMAND_005", `cannot reject from status ${request.status}`);
-    }
-    if (!cmd.reason?.trim()) {
-      throw new AppError("DEMAND_001", "rejection reason is required");
-    }
+      if (!ACTIVE_STATUSES.includes(request.status as (typeof ACTIVE_STATUSES)[number])) {
+        throw new AppError("DEMAND_005", `cannot reject from status ${request.status}`);
+      }
+      if (!cmd.reason?.trim()) {
+        throw new AppError("DEMAND_001", "rejection reason is required");
+      }
 
-    await this.gateDecisionRepo.append({
-      demandRequestId,
-      fromGate: request.currentGate,
-      toGate: null,
-      decision: "Rejected",
-      reason: cmd.reason,
-      decidedBy: ctx.userId,
-    });
+      await this.gateDecisionRepo.append(
+        {
+          demandRequestId,
+          fromGate: request.currentGate,
+          toGate: null,
+          decision: "Rejected",
+          reason: cmd.reason,
+          decidedBy: ctx.userId,
+        },
+        tx,
+      );
 
-    const updated = await this.demandRepo.updateStatusGate(demandRequestId, {
-      status: "Rejected",
-      rejectionReason: cmd.reason,
+      const next = await this.demandRepo.updateStatusGate(
+        demandRequestId,
+        { status: "Rejected", rejectionReason: cmd.reason },
+        tx,
+      );
+
+      await this.auditService.record(
+        {
+          actorId: ctx.userId,
+          action: "update",
+          entityType: "demand-request",
+          entityId: demandRequestId,
+          after: next,
+          requestId,
+        },
+        tx,
+      );
+
+      return next;
     });
 
     await this.eventBus.publish({
@@ -148,15 +189,6 @@ export class StageGateService {
       occurredAt: new Date().toISOString(),
       source: "demand-intake",
       data: { demandId: demandRequestId, reason: cmd.reason },
-    });
-
-    await this.auditService.record({
-      actorId: ctx.userId,
-      action: "update",
-      entityType: "demand-request",
-      entityId: demandRequestId,
-      after: updated,
-      requestId,
     });
 
     return updated;

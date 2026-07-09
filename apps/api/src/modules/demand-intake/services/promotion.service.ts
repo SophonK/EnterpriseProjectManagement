@@ -9,6 +9,7 @@ import {
 } from "@epm/shared";
 import { EVENT_BUS, type EventBus } from "../../../foundation/events/event-bus.js";
 import { AuditService } from "../../../foundation/audit/audit.service.js";
+import { PrismaService } from "../../../foundation/db/prisma.service.js";
 import { DemandRequestRepository } from "../repositories/demand-request.repository.js";
 
 /** Promotes an approved demand into an execution Project — event-driven (US-032, D3-2). */
@@ -18,6 +19,7 @@ export class PromotionService {
     private readonly demandRepo: DemandRequestRepository,
     @Inject(EVENT_BUS) private readonly eventBus: EventBus,
     private readonly auditService: AuditService,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -34,23 +36,35 @@ export class PromotionService {
     ctx: AuthContext,
     requestId: string,
   ): Promise<DemandRequestDTO> {
-    const request = await this.demandRepo.findByIdScoped(demandRequestId, ctx); // DEMAND_002
+    // REL-DI-03 / SEC-DI-05: row lock + Approved-status check (fail-closed, before any write)
+    // + status change + audit in ONE transaction. The lock also guards concurrent promotes —
+    // once one commits Promoted, the other re-reads Promoted and fails DEMAND_006.
+    const { updated, title } = await this.prisma.$transaction(async (tx) => {
+      const request = await this.demandRepo.findByIdScopedForUpdate(demandRequestId, ctx, tx); // DEMAND_002
 
-    if (request.status !== "Approved") {
-      throw new AppError("DEMAND_006", `promote requires Approved, got ${request.status}`);
-    }
+      if (request.status !== "Approved") {
+        throw new AppError("DEMAND_006", `promote requires Approved, got ${request.status}`);
+      }
 
-    const updated = await this.demandRepo.updateStatusGate(demandRequestId, {
-      status: "Promoted",
-    });
+      const next = await this.demandRepo.updateStatusGate(
+        demandRequestId,
+        { status: "Promoted" },
+        tx,
+      );
 
-    await this.auditService.record({
-      actorId: ctx.userId,
-      action: "update",
-      entityType: "demand-request",
-      entityId: demandRequestId,
-      after: updated,
-      requestId,
+      await this.auditService.record(
+        {
+          actorId: ctx.userId,
+          action: "update",
+          entityType: "demand-request",
+          entityId: demandRequestId,
+          after: next,
+          requestId,
+        },
+        tx,
+      );
+
+      return { updated: next, title: request.title };
     });
 
     await this.eventBus.publish({
@@ -60,7 +74,7 @@ export class PromotionService {
       source: "demand-intake",
       data: {
         demandId: demandRequestId,
-        name: request.title,
+        name: title,
         portfolioId: cmd.portfolioId,
         programId: cmd.programId ?? null,
         plannedStart: cmd.plannedStart,

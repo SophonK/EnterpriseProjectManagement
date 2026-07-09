@@ -34,7 +34,8 @@ interface Link {
 
 /**
  * View repo mock whose aggregations mirror the real repository:
- * - portfolio dimension = strict partition over all rows (null → "__unassigned__"),
+ * - portfolio dimension = partition over rows WITH a portfolio (null portfolio excluded,
+ *   matching `aggregateByPortfolio`'s `where: { portfolioId: { not: null } }`),
  * - goal dimension = per-link expansion over links whose project is in the projection.
  */
 function makeViewRepo(rows: ViewRow[], links: Link[]) {
@@ -42,11 +43,11 @@ function makeViewRepo(rows: ViewRow[], links: Link[]) {
     aggregateByPortfolio: vi.fn().mockImplementation(async () => {
       const acc = new Map<string, { projectCount: number; totalPlannedBudget: number }>();
       for (const r of rows) {
-        const key = r.portfolioId ?? "__unassigned__";
-        const cur = acc.get(key) ?? { projectCount: 0, totalPlannedBudget: 0 };
+        if (r.portfolioId === null) continue; // real repo excludes portfolio-less rows
+        const cur = acc.get(r.portfolioId) ?? { projectCount: 0, totalPlannedBudget: 0 };
         cur.projectCount += 1;
         cur.totalPlannedBudget += r.plannedBudget ?? 0;
-        acc.set(key, cur);
+        acc.set(r.portfolioId, cur);
       }
       return [...acc.entries()].map(([groupId, v]) => ({ groupId, ...v }));
     }),
@@ -90,12 +91,15 @@ describe("PBT P1 — investment-mix total-preserving", () => {
 
         const groups = await svc.getInvestmentMix("portfolio", CTX);
 
-        const expectedBudget = rows.reduce((s, r) => s + (r.plannedBudget ?? 0), 0);
+        // The real repo excludes portfolio-less rows, so the conserved quantity is over
+        // rows that HAVE a portfolio, not all rows.
+        const scoped = rows.filter((r) => r.portfolioId !== null);
+        const expectedBudget = scoped.reduce((s, r) => s + (r.plannedBudget ?? 0), 0);
         const sumBudget = groups.reduce((s, g) => s + g.totalPlannedBudget, 0);
         const sumCount = groups.reduce((s, g) => s + g.projectCount, 0);
 
         expect(sumBudget).toBe(expectedBudget); // no budget lost or double-counted
-        expect(sumCount).toBe(rows.length); // partition: every project counted exactly once
+        expect(sumCount).toBe(scoped.length); // partition over portfolio-bearing projects
       }),
       { numRuns: 100 },
     );
@@ -198,7 +202,7 @@ describe("PBT P3 — link idempotency (set semantics via @@unique)", () => {
           }),
           countByProject: vi.fn().mockResolvedValue(goalIds.length),
         };
-        const goalRepo = { existsById: vi.fn().mockResolvedValue(true) };
+        const goalRepo = { existsActiveById: vi.fn().mockResolvedValue(true) };
         const alignmentService = {
           evaluateAlignment: vi.fn().mockResolvedValue(goalIds.length >= 1),
         };
@@ -243,7 +247,7 @@ describe("PBT P3 — link idempotency (set semantics via @@unique)", () => {
             for (const g of ids) store.add(`${pid}:${g}`);
           }),
         };
-        const goalRepo = { existsById: vi.fn().mockResolvedValue(true) };
+        const goalRepo = { existsActiveById: vi.fn().mockResolvedValue(true) };
         const svc = new PortfolioService(
           portfolioRepo as never,
           goalRepo as never,

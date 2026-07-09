@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import type { GateDecisionDTO, IntakeGate, GateOutcome } from "@epm/shared";
 import { BaseRepository } from "../../../foundation/db/base-repository.js";
 import type { PrismaService } from "../../../foundation/db/prisma.service.js";
@@ -11,16 +12,24 @@ export class GateDecisionRepository extends BaseRepository {
     super(prisma);
   }
 
-  /** Append a stage-gate decision (advance or reject). `toGate` is null on reject. */
-  async append(data: {
-    demandRequestId: string;
-    fromGate: IntakeGate;
-    toGate: IntakeGate | null;
-    decision: GateOutcome;
-    reason?: string | null;
-    decidedBy: string;
-  }): Promise<GateDecisionDTO> {
-    const row = await this.prisma.gateDecision.create({
+  /**
+   * Append a stage-gate decision (advance or reject). `toGate` is null on reject. An optional
+   * transaction client routes the write through the caller's transaction so the decision, the
+   * status change, and the audit row commit atomically (REL-DI-03).
+   */
+  async append(
+    data: {
+      demandRequestId: string;
+      fromGate: IntakeGate;
+      toGate: IntakeGate | null;
+      decision: GateOutcome;
+      reason?: string | null;
+      decidedBy: string;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<GateDecisionDTO> {
+    const client = tx ?? this.prisma;
+    const row = await client.gateDecision.create({
       data: {
         demandRequestId: data.demandRequestId,
         fromGate: data.fromGate,

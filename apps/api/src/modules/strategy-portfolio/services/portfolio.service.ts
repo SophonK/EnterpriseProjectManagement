@@ -79,9 +79,10 @@ export class PortfolioService {
     // Scope + existence check on the parent portfolio.
     await this.portfolioRepo.findByIdScoped(portfolioId, ctx);
 
-    // Both endpoints must be resolvable at association time (a goal must exist).
+    // Both endpoints must be resolvable at association time — the goal must exist AND be
+    // Active (an Archived goal cannot be freshly associated).
     for (const goalId of goalIds) {
-      const exists = await this.goalRepo.existsById(goalId);
+      const exists = await this.goalRepo.existsActiveById(goalId);
       if (!exists) throw new AppError("STRATEGY_002", `Strategic goal ${goalId} not found`);
     }
 

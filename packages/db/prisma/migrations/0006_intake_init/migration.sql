@@ -100,6 +100,12 @@ CREATE TABLE "intake"."gate_decision" (
 -- CreateIndex
 CREATE INDEX "idx_demand_request_status" ON "intake"."demand_request"("status");
 CREATE INDEX "idx_scoring_model_active" ON "intake"."scoring_model"("is_active");
+-- Single-active ScoringModel invariant (BR-209/D3-3): at most one row may have is_active = true.
+-- This is a PARTIAL unique index (predicate `WHERE "is_active"`), which Prisma's schema DSL
+-- cannot express, so it lives here in the migration SQL only (no corresponding @@unique in
+-- schema.prisma). It is the DB guard behind the atomic create+activate transaction: two
+-- concurrent first-time activations cannot both commit is_active = true (the loser hits P2002).
+CREATE UNIQUE INDEX "uq_scoring_model_single_active" ON "intake"."scoring_model" ("is_active") WHERE "is_active";
 CREATE INDEX "idx_scoring_criterion_model" ON "intake"."scoring_criterion"("scoring_model_id");
 CREATE UNIQUE INDEX "uq_score_card_demand" ON "intake"."score_card"("demand_request_id");
 CREATE UNIQUE INDEX "uq_criterion_score_card_criterion" ON "intake"."criterion_score"("score_card_id", "criterion_id");

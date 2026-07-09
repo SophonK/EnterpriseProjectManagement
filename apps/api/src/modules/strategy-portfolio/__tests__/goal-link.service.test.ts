@@ -14,14 +14,14 @@ function makeGoalLinkRepo(overrides: Partial<Record<string, unknown>> = {}) {
       linkedBy,
       createdAt: new Date().toISOString(),
     })),
-    delete: vi.fn().mockResolvedValue(undefined),
+    delete: vi.fn().mockResolvedValue("proj-1"),
     countByProject: vi.fn().mockResolvedValue(1),
     ...overrides,
   };
 }
 
 function makeGoalRepo(overrides: Partial<Record<string, unknown>> = {}) {
-  return { existsById: vi.fn().mockResolvedValue(true), ...overrides };
+  return { existsActiveById: vi.fn().mockResolvedValue(true), ...overrides };
 }
 
 function makeAlignmentService() {
@@ -87,7 +87,7 @@ describe("GoalLinkService.linkProjectToGoals — BR-107", () => {
   it("throws STRATEGY_002 when a goal does not exist", async () => {
     const svc = new GoalLinkService(
       makeGoalLinkRepo() as never,
-      makeGoalRepo({ existsById: vi.fn().mockResolvedValue(false) }) as never,
+      makeGoalRepo({ existsActiveById: vi.fn().mockResolvedValue(false) }) as never,
       makeAlignmentService() as never,
       makeEventBus() as never,
       makeAudit() as never,
@@ -97,16 +97,35 @@ describe("GoalLinkService.linkProjectToGoals — BR-107", () => {
       svc.linkProjectToGoals("proj-1", ["missing"], "user-1", CTX, "req-1"),
     ).rejects.toMatchObject({ code: "STRATEGY_002" });
   });
+
+  it("rejects linking an Archived (non-Active) goal with STRATEGY_002 and never upserts", async () => {
+    const goalLinkRepo = makeGoalLinkRepo();
+    // existsActiveById is false for an Archived goal (it exists but is not Active).
+    const svc = new GoalLinkService(
+      goalLinkRepo as never,
+      makeGoalRepo({ existsActiveById: vi.fn().mockResolvedValue(false) }) as never,
+      makeAlignmentService() as never,
+      makeEventBus() as never,
+      makeAudit() as never,
+    );
+
+    await expect(
+      svc.linkProjectToGoals("proj-1", ["archived-goal"], "user-1", CTX, "req-1"),
+    ).rejects.toMatchObject({ code: "STRATEGY_002" });
+    expect(goalLinkRepo.upsertLink).not.toHaveBeenCalled();
+  });
 });
 
 describe("GoalLinkService.unlinkGoal", () => {
-  it("deletes the link and audits", async () => {
-    const goalLinkRepo = makeGoalLinkRepo();
+  it("deletes the link, recomputes alignment for the freed project, and audits", async () => {
+    // delete() returns the projectId the deleted link belonged to.
+    const goalLinkRepo = makeGoalLinkRepo({ delete: vi.fn().mockResolvedValue("proj-42") });
+    const alignment = makeAlignmentService();
     const audit = makeAudit();
     const svc = new GoalLinkService(
       goalLinkRepo as never,
       makeGoalRepo() as never,
-      makeAlignmentService() as never,
+      alignment as never,
       makeEventBus() as never,
       audit as never,
     );
@@ -114,6 +133,9 @@ describe("GoalLinkService.unlinkGoal", () => {
     await svc.unlinkGoal("link-1", CTX, "req-1");
 
     expect(goalLinkRepo.delete).toHaveBeenCalledWith("link-1");
+    // H1: alignment must be re-evaluated for the project whose link was removed so a
+    // project losing its last link becomes unaligned (and, if active, is flagged).
+    expect(alignment.evaluateAlignment).toHaveBeenCalledWith("proj-42");
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({ action: "delete", entityType: "goal-link" }),
     );

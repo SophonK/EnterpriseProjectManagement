@@ -26,7 +26,9 @@ function makeDemandDTO(overrides: Partial<DemandRequestDTO> = {}): DemandRequest
 
 function makeDemandRepo(request: DemandRequestDTO) {
   return {
-    findByIdScoped: vi.fn().mockResolvedValue(request),
+    // The service now reads-for-update inside the transaction (row lock) rather than the plain
+    // scoped read, so the mock exposes findByIdScopedForUpdate.
+    findByIdScopedForUpdate: vi.fn().mockResolvedValue(request),
     updateStatusGate: vi
       .fn()
       .mockImplementation(async (_id: string, data: { status: string }) =>
@@ -43,6 +45,16 @@ function makeAudit() {
   return { record: vi.fn().mockResolvedValue(undefined) };
 }
 
+// Sentinel transaction client; the mock $transaction hands the SAME object to the callback so
+// tests can assert the status change + audit were routed through the one interactive transaction.
+const TX = { $queryRaw: vi.fn().mockResolvedValue([]) };
+
+function makePrisma() {
+  return {
+    $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(TX)),
+  };
+}
+
 const PROMOTE_CMD = {
   portfolioId: "11111111-1111-1111-1111-111111111111",
   programId: "22222222-2222-2222-2222-222222222222",
@@ -56,17 +68,20 @@ describe("PromotionService.promoteToProject — BR-208", () => {
     const repo = makeDemandRepo(makeDemandDTO({ status: "Approved" }));
     const eventBus = makeEventBus();
     const audit = makeAudit();
-    const svc = new PromotionService(repo as never, eventBus as never, audit as never);
+    const svc = new PromotionService(repo as never, eventBus as never, audit as never, makePrisma() as never);
 
     const dto = await svc.promoteToProject("demand-1", PROMOTE_CMD, CTX, "req-1");
 
     expect(dto.status).toBe("Promoted");
+    // Status change + audit ran inside the one interactive transaction (routed through TX).
     expect(repo.updateStatusGate).toHaveBeenCalledWith(
       "demand-1",
       expect.objectContaining({ status: "Promoted" }),
+      TX,
     );
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({ action: "update", entityType: "demand-request" }),
+      TX,
     );
     // name defaults from the demand title; payload byte-matches DemandPromotedPayload
     expect(eventBus.publish).toHaveBeenCalledWith(
@@ -91,11 +106,13 @@ describe("PromotionService.promoteToProject — BR-208", () => {
     async (status) => {
       const repo = makeDemandRepo(makeDemandDTO({ status }));
       const eventBus = makeEventBus();
-      const svc = new PromotionService(repo as never, eventBus as never, makeAudit() as never);
+      const svc = new PromotionService(repo as never, eventBus as never, makeAudit() as never, makePrisma() as never);
 
       await expect(
         svc.promoteToProject("demand-1", PROMOTE_CMD, CTX, "req-1"),
       ).rejects.toMatchObject({ code: "DEMAND_006" });
+      // Fail-closed inside the tx: the non-Approved status check throws before any write,
+      // so nothing is mutated and no event escapes the rolled-back transaction.
       expect(repo.updateStatusGate).not.toHaveBeenCalled();
       expect(eventBus.publish).not.toHaveBeenCalled();
     },
@@ -104,7 +121,7 @@ describe("PromotionService.promoteToProject — BR-208", () => {
   it("defaults optional programId/plannedBudget to null in the payload", async () => {
     const repo = makeDemandRepo(makeDemandDTO({ status: "Approved" }));
     const eventBus = makeEventBus();
-    const svc = new PromotionService(repo as never, eventBus as never, makeAudit() as never);
+    const svc = new PromotionService(repo as never, eventBus as never, makeAudit() as never, makePrisma() as never);
 
     await svc.promoteToProject(
       "demand-1",

@@ -26,7 +26,7 @@ function makeDemandDTO(overrides: Partial<DemandRequestDTO> = {}): DemandRequest
 
 function makeDemandRepo(request: DemandRequestDTO, overrides: Partial<Record<string, unknown>> = {}) {
   return {
-    findByIdScoped: vi.fn().mockResolvedValue(request),
+    findByIdScopedForUpdate: vi.fn().mockResolvedValue(request),
     updateStatusGate: vi
       .fn()
       .mockImplementation(
@@ -51,6 +51,16 @@ function makeAudit() {
   return { record: vi.fn().mockResolvedValue(undefined) };
 }
 
+// Sentinel transaction client; the mock $transaction hands the SAME object to the callback so
+// tests can assert every repo/audit write was routed through the one interactive transaction.
+const TX = { $queryRaw: vi.fn().mockResolvedValue([]) };
+
+function makePrisma() {
+  return {
+    $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(TX)),
+  };
+}
+
 const permitAll = { permitted: vi.fn().mockReturnValue(true) };
 
 describe("StageGateService.advanceGate — BR-205 per-gate RBAC", () => {
@@ -58,23 +68,31 @@ describe("StageGateService.advanceGate — BR-205 per-gate RBAC", () => {
     const repo = makeDemandRepo(makeDemandDTO({ status: "Submitted", currentGate: "Submitted" }));
     const gates = makeGateDecisionRepo();
     const rbac = { permitted: vi.fn().mockReturnValue(true) };
+    const prisma = makePrisma();
     const svc = new StageGateService(
       repo as never,
       gates as never,
       rbac as never,
       makeEventBus() as never,
       makeAudit() as never,
+      prisma as never,
     );
 
     const dto = await svc.advanceGate("demand-1", CTX, "req-1");
 
     expect(rbac.permitted).toHaveBeenCalledWith(CTX.roles, "intake-gate:screening");
+    // The read-for-update + decision + status change all ran inside one interactive transaction,
+    // and each write was routed through the SAME tx client (TX sentinel).
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(repo.findByIdScopedForUpdate).toHaveBeenCalledWith("demand-1", CTX, TX);
     expect(gates.append).toHaveBeenCalledWith(
       expect.objectContaining({ fromGate: "Submitted", toGate: "Screening", decision: "Advanced" }),
+      TX,
     );
     expect(repo.updateStatusGate).toHaveBeenCalledWith(
       "demand-1",
       expect.objectContaining({ status: "Screening", currentGate: "Screening" }),
+      TX,
     );
     expect(dto.status).toBe("Screening");
   });
@@ -89,11 +107,14 @@ describe("StageGateService.advanceGate — BR-205 per-gate RBAC", () => {
       rbac as never,
       makeEventBus() as never,
       makeAudit() as never,
+      makePrisma() as never,
     );
 
     await expect(svc.advanceGate("demand-1", CTX, "req-1")).rejects.toMatchObject({
       code: "AUTH_002",
     });
+    // Fail-closed inside the transaction: the permission check throws before any write, so
+    // neither the GateDecision nor the status change is persisted (the tx rolls back).
     expect(gates.append).not.toHaveBeenCalled();
     expect(repo.updateStatusGate).not.toHaveBeenCalled();
   });
@@ -107,6 +128,7 @@ describe("StageGateService.advanceGate — BR-205 per-gate RBAC", () => {
       permitAll as never,
       eventBus as never,
       makeAudit() as never,
+      makePrisma() as never,
     );
 
     const dto = await svc.advanceGate("demand-1", CTX, "req-1");
@@ -129,6 +151,7 @@ describe("StageGateService.advanceGate — BR-205 per-gate RBAC", () => {
       permitAll as never,
       makeEventBus() as never,
       makeAudit() as never,
+      makePrisma() as never,
     );
 
     await expect(svc.advanceGate("demand-1", CTX, "req-1")).rejects.toMatchObject({
@@ -146,6 +169,7 @@ describe("StageGateService.advanceGate — BR-205 per-gate RBAC", () => {
       permitAll as never,
       makeEventBus() as never,
       makeAudit() as never,
+      makePrisma() as never,
     );
 
     await expect(svc.advanceGate("demand-1", CTX, "req-1")).rejects.toMatchObject({
@@ -165,14 +189,17 @@ describe("StageGateService.rejectGate — BR-207 rejection is terminal with reas
       permitAll as never,
       eventBus as never,
       makeAudit() as never,
+      makePrisma() as never,
     );
 
     const dto = await svc.rejectGate("demand-1", { reason: "no budget" }, CTX, "req-1");
 
     expect(dto.status).toBe("Rejected");
     expect(dto.rejectionReason).toBe("no budget");
+    // The reject GateDecision was routed through the interactive transaction (TX sentinel).
     expect(gates.append).toHaveBeenCalledWith(
       expect.objectContaining({ toGate: null, decision: "Rejected", reason: "no budget" }),
+      TX,
     );
     expect(eventBus.publish).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -191,6 +218,7 @@ describe("StageGateService.rejectGate — BR-207 rejection is terminal with reas
       permitAll as never,
       makeEventBus() as never,
       makeAudit() as never,
+      makePrisma() as never,
     );
 
     await expect(svc.rejectGate("demand-1", { reason: "  " }, CTX, "req-1")).rejects.toMatchObject({
@@ -208,10 +236,31 @@ describe("StageGateService.rejectGate — BR-207 rejection is terminal with reas
       permitAll as never,
       makeEventBus() as never,
       makeAudit() as never,
+      makePrisma() as never,
     );
 
     await expect(
       svc.rejectGate("demand-1", { reason: "late" }, CTX, "req-1"),
     ).rejects.toMatchObject({ code: "DEMAND_005" });
+  });
+
+  it("REL-DI-03: a mid-transaction audit failure aborts the whole advance (no event published)", async () => {
+    // The decision + status change + audit share one interactive transaction. If the audit
+    // write throws, $transaction rejects and NOTHING commits — critically, the post-commit
+    // demand.approved event is never published (an event must not escape a rolled-back tx).
+    const repo = makeDemandRepo(makeDemandDTO({ status: "Evaluation", currentGate: "Evaluation" }));
+    const eventBus = makeEventBus();
+    const audit = { record: vi.fn().mockRejectedValue(new Error("audit insert failed")) };
+    const svc = new StageGateService(
+      repo as never,
+      makeGateDecisionRepo() as never,
+      permitAll as never,
+      eventBus as never,
+      audit as never,
+      makePrisma() as never,
+    );
+
+    await expect(svc.advanceGate("demand-1", CTX, "req-1")).rejects.toThrow("audit insert failed");
+    expect(eventBus.publish).not.toHaveBeenCalled();
   });
 });

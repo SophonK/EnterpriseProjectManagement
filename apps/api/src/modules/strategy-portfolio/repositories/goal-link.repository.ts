@@ -16,19 +16,42 @@ export class GoalLinkRepository extends BaseRepository {
    * Idempotent link upsert (set semantics via `@@unique([goalId, projectId])`).
    * A repeated link of the same pair is a no-op update returning the existing row —
    * no duplicate row, no error (P3).
+   *
+   * `upsert` is not atomic against the unique constraint: two concurrent inserts of the
+   * same pair can both miss the existing row and race to `create`, so one loses with a
+   * P2002 unique violation. That is still the idempotent outcome (the row exists), so we
+   * catch P2002 and read the winning row back rather than surfacing a 500.
    */
   async upsertLink(goalId: string, projectId: string, linkedBy: string): Promise<GoalLinkDTO> {
-    const row = await this.prisma.goalLink.upsert({
-      where: { uq_goal_link: { goalId, projectId } },
-      create: { goalId, projectId, linkedBy },
-      update: {},
-    });
-    return toDTO(row);
+    try {
+      const row = await this.prisma.goalLink.upsert({
+        where: { uq_goal_link: { goalId, projectId } },
+        create: { goalId, projectId, linkedBy },
+        update: {},
+      });
+      return toDTO(row);
+    } catch (err) {
+      if (!isPrismaUniqueViolation(err)) throw err;
+      // Lost a concurrent create race — the pair already exists, so re-read and return it.
+      const existing = await this.prisma.goalLink.findUnique({
+        where: { uq_goal_link: { goalId, projectId } },
+      });
+      if (!existing) throw err; // shouldn't happen: P2002 implies the row is present
+      return toDTO(existing);
+    }
   }
 
-  async delete(id: string): Promise<void> {
+  /**
+   * Delete a link and return the `projectId` it belonged to, so the caller can recompute
+   * that project's alignment (BR-103/BR-104). Throws STRATEGY_006 when the link is missing.
+   */
+  async delete(id: string): Promise<string> {
     try {
-      await this.prisma.goalLink.delete({ where: { id } });
+      const deleted = await this.prisma.goalLink.delete({
+        where: { id },
+        select: { projectId: true },
+      });
+      return deleted.projectId;
     } catch (err) {
       if (isPrismaNotFound(err)) throw new AppError("STRATEGY_006", `Goal link ${id} not found`);
       throw err;
@@ -81,10 +104,18 @@ function toDTO(row: GoalLinkRow): GoalLinkDTO {
 }
 
 function isPrismaNotFound(err: unknown): boolean {
+  return hasPrismaCode(err, "P2025");
+}
+
+function isPrismaUniqueViolation(err: unknown): boolean {
+  return hasPrismaCode(err, "P2002");
+}
+
+function hasPrismaCode(err: unknown, code: string): boolean {
   return (
     err != null &&
     typeof err === "object" &&
     "code" in err &&
-    (err as { code: string }).code === "P2025"
+    (err as { code: string }).code === code
   );
 }

@@ -44,6 +44,16 @@ function makeAudit() {
   return { record: vi.fn().mockResolvedValue(undefined) };
 }
 
+// Sentinel transaction client; the mock $transaction hands the SAME object to the callback so
+// tests can assert the upsert + audit were routed through the one interactive transaction.
+const TX = { $queryRaw: vi.fn().mockResolvedValue([]) };
+
+function makePrisma() {
+  return {
+    $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(TX)),
+  };
+}
+
 describe("ScoringService.scoreRequest — BR-203/BR-204 scoring guards", () => {
   it("computes weightedTotal via ScoreCalculator and upserts the single ScoreCard", async () => {
     const scoreCardRepo = {
@@ -61,12 +71,13 @@ describe("ScoringService.scoreRequest — BR-203/BR-204 scoring guards", () => {
       findByRequest: vi.fn(),
     };
     const modelRepo = { getActiveOrThrow: vi.fn().mockResolvedValue(makeModelDTO()) };
-    const demandRepo = { findByIdScoped: vi.fn().mockResolvedValue(makeDemandDTO()), listForRanking: vi.fn() };
+    const demandRepo = { findByIdScopedForUpdate: vi.fn().mockResolvedValue(makeDemandDTO()), listForRanking: vi.fn() };
     const svc = new ScoringService(
       scoreCardRepo as never,
       modelRepo as never,
       demandRepo as never,
       makeAudit() as never,
+      makePrisma() as never,
     );
 
     // c-1: 100/100 = 1 (weight 3); c-2: 5/10 = 0.5 (weight 1) → (3*1 + 1*0.5)/4 * 100 = 87.5
@@ -78,19 +89,22 @@ describe("ScoringService.scoreRequest — BR-203/BR-204 scoring guards", () => {
     );
 
     expect(card.weightedTotal).toBeCloseTo(87.5, 6);
+    // The single ScoreCard upsert was routed through the interactive transaction (TX sentinel).
     expect(scoreCardRepo.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ demandRequestId: "demand-1", scoringModelId: "model-1" }),
+      TX,
     );
   });
 
   it("rejects a rawScore above the criterion maxScore with DEMAND_004", async () => {
     const modelRepo = { getActiveOrThrow: vi.fn().mockResolvedValue(makeModelDTO()) };
-    const demandRepo = { findByIdScoped: vi.fn().mockResolvedValue(makeDemandDTO()), listForRanking: vi.fn() };
+    const demandRepo = { findByIdScopedForUpdate: vi.fn().mockResolvedValue(makeDemandDTO()), listForRanking: vi.fn() };
     const svc = new ScoringService(
       { upsert: vi.fn(), findByRequest: vi.fn() } as never,
       modelRepo as never,
       demandRepo as never,
       makeAudit() as never,
+      makePrisma() as never,
     );
 
     await expect(
@@ -100,7 +114,7 @@ describe("ScoringService.scoreRequest — BR-203/BR-204 scoring guards", () => {
 
   it("rejects scoring a non-scorable request (status Submitted) with DEMAND_007", async () => {
     const demandRepo = {
-      findByIdScoped: vi.fn().mockResolvedValue(makeDemandDTO({ status: "Submitted" })),
+      findByIdScopedForUpdate: vi.fn().mockResolvedValue(makeDemandDTO({ status: "Submitted" })),
       listForRanking: vi.fn(),
     };
     const svc = new ScoringService(
@@ -108,6 +122,7 @@ describe("ScoringService.scoreRequest — BR-203/BR-204 scoring guards", () => {
       { getActiveOrThrow: vi.fn() } as never,
       demandRepo as never,
       makeAudit() as never,
+      makePrisma() as never,
     );
 
     await expect(
@@ -136,6 +151,7 @@ describe("ScoringService.scoreRequest — BR-203/BR-204 scoring guards", () => {
       { getActiveOrThrow: vi.fn() } as never,
       demandRepo as never,
       makeAudit() as never,
+      makePrisma() as never,
     );
 
     const ranked = await svc.rankRequests(CTX);

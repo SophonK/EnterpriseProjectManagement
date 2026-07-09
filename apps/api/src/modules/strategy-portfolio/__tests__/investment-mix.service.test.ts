@@ -36,10 +36,10 @@ describe("InvestmentMixService.getInvestmentMix — BR-108 grouping semantics", 
     expect(viewRepo.aggregateByGoal).not.toHaveBeenCalled();
   });
 
-  it("groupBy=portfolio: falls back to groupId when the name is unknown (null-portfolio bucket)", async () => {
+  it("groupBy=portfolio: falls back to groupId when the portfolio name is unknown", async () => {
     const viewRepo = {
       aggregateByPortfolio: vi.fn().mockResolvedValue([
-        { groupId: "__unassigned__", projectCount: 2, totalPlannedBudget: 50 },
+        { groupId: "port-orphan", projectCount: 2, totalPlannedBudget: 50 },
       ]),
       aggregateByGoal: vi.fn(),
     };
@@ -51,8 +51,27 @@ describe("InvestmentMixService.getInvestmentMix — BR-108 grouping semantics", 
     );
 
     const result = await svc.getInvestmentMix("portfolio", CTX);
-    expect(result[0]?.groupName).toBe("__unassigned__");
+    expect(result[0]?.groupName).toBe("port-orphan");
     expect(result[0]?.totalPlannedBudget).toBe(50);
+  });
+
+  it("forwards the AuthContext to the repository so aggregation is record-scoped", async () => {
+    const viewRepo = {
+      aggregateByPortfolio: vi.fn().mockResolvedValue([]),
+      aggregateByGoal: vi.fn().mockResolvedValue([]),
+    };
+    const svc = new InvestmentMixService(
+      viewRepo as never,
+      { count: vi.fn() } as never,
+      { listActive: vi.fn().mockResolvedValue([]) } as never,
+      { findMany: vi.fn().mockResolvedValue([]) } as never,
+    );
+
+    await svc.getInvestmentMix("portfolio", CTX);
+    expect(viewRepo.aggregateByPortfolio).toHaveBeenCalledWith(CTX);
+
+    await svc.getInvestmentMix("goal", CTX);
+    expect(viewRepo.aggregateByGoal).toHaveBeenCalledWith(CTX);
   });
 
   it("groupBy=goal: maps link-expanded aggregation and resolves goal titles", async () => {

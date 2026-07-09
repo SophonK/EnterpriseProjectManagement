@@ -17,6 +17,16 @@ function makeAudit() {
   return { record: vi.fn().mockResolvedValue(undefined) };
 }
 
+// Interactive-transaction stub for the stage-gate service (P3). $transaction runs the callback
+// with a tx client that also answers the row-lock $queryRaw, so advanceGate/rejectGate drive
+// their REAL transactional path against the in-memory mutable request.
+function makePrisma() {
+  const tx = { $queryRaw: vi.fn().mockResolvedValue([]) };
+  return {
+    $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(tx)),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // P1 — computeWeightedTotal bounded & correct (numRuns 100)
 // ---------------------------------------------------------------------------
@@ -163,7 +173,7 @@ interface MutableRequest {
 // (mirrors the real persistence so "no mutation on illegal command" is observable).
 function makeDemandRepo(request: MutableRequest) {
   return {
-    findByIdScoped: vi.fn().mockImplementation(async () => ({
+    findByIdScopedForUpdate: vi.fn().mockImplementation(async () => ({
       ...request,
       title: "d",
       sponsor: "s",
@@ -220,6 +230,7 @@ describe("PBT P3 — stage-gate transition validity (BR-206/BR-207)", () => {
           permitAll as never,
           makeEventBus() as never,
           makeAudit() as never,
+          makePrisma() as never,
         );
 
         for (const cmd of cmds) {

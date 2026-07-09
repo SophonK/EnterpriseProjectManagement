@@ -31,7 +31,7 @@ export class InvestmentMixService {
     ctx: AuthContext,
   ): Promise<InvestmentSummary[]> {
     if (groupBy === "portfolio") {
-      const groups = await this.viewRepo.aggregateByPortfolio();
+      const groups = await this.viewRepo.aggregateByPortfolio(ctx);
       const portfolios = await this.portfolioRepo.findMany(ctx);
       const nameById = new Map(portfolios.map((p) => [p.id, p.name]));
       return groups.map((g) => ({
@@ -43,7 +43,7 @@ export class InvestmentMixService {
       }));
     }
 
-    const groups = await this.viewRepo.aggregateByGoal();
+    const groups = await this.viewRepo.aggregateByGoal(ctx);
     const goals = await this.goalRepo.listActive();
     const nameById = new Map(goals.map((g) => [g.id, g.title]));
     return groups.map((g) => ({

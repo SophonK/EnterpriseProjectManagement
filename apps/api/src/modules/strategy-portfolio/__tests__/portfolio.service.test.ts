@@ -30,7 +30,7 @@ function makePortfolioRepo(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 function makeGoalRepo(overrides: Partial<Record<string, unknown>> = {}) {
-  return { existsById: vi.fn().mockResolvedValue(true), ...overrides };
+  return { existsActiveById: vi.fn().mockResolvedValue(true), ...overrides };
 }
 
 function makeEventBus() {
@@ -106,7 +106,7 @@ describe("PortfolioService.associateGoals — BR-106 idempotent association", ()
   it("throws STRATEGY_002 when a goal does not exist", async () => {
     const svc = new PortfolioService(
       makePortfolioRepo() as never,
-      makeGoalRepo({ existsById: vi.fn().mockResolvedValue(false) }) as never,
+      makeGoalRepo({ existsActiveById: vi.fn().mockResolvedValue(false) }) as never,
       makeEventBus() as never,
       makeAudit() as never,
     );
@@ -114,5 +114,21 @@ describe("PortfolioService.associateGoals — BR-106 idempotent association", ()
     await expect(
       svc.associateGoals("port-1", ["missing"], CTX, "req-1"),
     ).rejects.toMatchObject({ code: "STRATEGY_002" });
+  });
+
+  it("rejects associating an Archived (non-Active) goal with STRATEGY_002 and never writes the join", async () => {
+    const repo = makePortfolioRepo();
+    // An Archived goal exists but is not Active → existsActiveById is false.
+    const svc = new PortfolioService(
+      repo as never,
+      makeGoalRepo({ existsActiveById: vi.fn().mockResolvedValue(false) }) as never,
+      makeEventBus() as never,
+      makeAudit() as never,
+    );
+
+    await expect(
+      svc.associateGoals("port-1", ["archived-goal"], CTX, "req-1"),
+    ).rejects.toMatchObject({ code: "STRATEGY_002" });
+    expect(repo.associateGoals).not.toHaveBeenCalled();
   });
 });

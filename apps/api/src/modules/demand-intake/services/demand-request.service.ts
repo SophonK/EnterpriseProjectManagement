@@ -5,6 +5,7 @@ import {
   DEMAND_INTAKE_EVENTS,
   type AuthContext,
   type DemandRequestDTO,
+  type DemandStatus,
   type SubmitIntakeCommand,
 } from "@epm/shared";
 import { EVENT_BUS, type EventBus } from "../../../foundation/events/event-bus.js";
@@ -72,7 +73,8 @@ export class DemandRequestService {
   }
 
   // BR-210: record-scoped — Director sees all requests, everyone else only their own.
-  async listRequests(ctx: AuthContext): Promise<DemandRequestDTO[]> {
-    return this.demandRepo.findManyScoped(ctx);
+  // An optional `status` narrows the list to a single DemandStatus (api-spec `?status=`).
+  async listRequests(ctx: AuthContext, status?: DemandStatus): Promise<DemandRequestDTO[]> {
+    return this.demandRepo.findManyScoped(ctx, status);
   }
 }

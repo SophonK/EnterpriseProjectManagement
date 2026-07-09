@@ -67,6 +67,18 @@ export class StrategicGoalRepository extends BaseRepository {
     const row = await this.prisma.strategicGoal.findUnique({ where: { id }, select: { id: true } });
     return row !== null;
   }
+
+  /**
+   * True only when the goal exists AND is `Active`. Used to gate NEW links/associations
+   * so an Archived goal cannot be freshly linked (reads of pre-existing links are untouched).
+   */
+  async existsActiveById(id: string): Promise<boolean> {
+    const row = await this.prisma.strategicGoal.findFirst({
+      where: { id, status: "Active" },
+      select: { id: true },
+    });
+    return row !== null;
+  }
 }
 
 // ---------------------------------------------------------------------------

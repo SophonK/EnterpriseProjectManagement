@@ -6,6 +6,7 @@ import {
   type ScoringModelDTO,
 } from "@epm/shared";
 import { AuditService } from "../../../foundation/audit/audit.service.js";
+import { PrismaService } from "../../../foundation/db/prisma.service.js";
 import {
   ScoringModelRepository,
   type CriterionInput,
@@ -17,6 +18,7 @@ export class ScoringModelService {
   constructor(
     private readonly scoringModelRepo: ScoringModelRepository,
     private readonly auditService: AuditService,
+    private readonly prisma: PrismaService,
   ) {}
 
   // BR-209: single active scoring model version. configureScoring (EPMO Director only,
@@ -36,22 +38,33 @@ export class ScoringModelService {
       sortOrder: index,
     }));
 
-    const created = await this.scoringModelRepo.createWithCriteria(
-      { name: cmd.name, createdBy: ctx.userId },
-      criteria,
-    );
-    const activated = await this.scoringModelRepo.activate(created.id);
+    // Fold create-with-criteria AND activate (deactivate others + set this active) plus the
+    // audit into ONE transaction so the single-active invariant (BR-209) is atomic: the new
+    // model becomes active and any prior active model is deactivated in the same commit, and
+    // the partial unique index `uq_scoring_model_single_active` rejects a racing second
+    // activation (P2002) rather than leaving two active rows.
+    return this.prisma.$transaction(async (tx) => {
+      const created = await this.scoringModelRepo.createWithCriteria(
+        { name: cmd.name, createdBy: ctx.userId },
+        criteria,
+        tx,
+      );
+      const activated = await this.scoringModelRepo.activate(created.id, tx);
 
-    await this.auditService.record({
-      actorId: ctx.userId,
-      action: "create",
-      entityType: "scoring-model",
-      entityId: activated.id,
-      after: activated,
-      requestId,
+      await this.auditService.record(
+        {
+          actorId: ctx.userId,
+          action: "create",
+          entityType: "scoring-model",
+          entityId: activated.id,
+          after: activated,
+          requestId,
+        },
+        tx,
+      );
+
+      return activated;
     });
-
-    return activated;
   }
 
   // The single active scoring model, or DEMAND_003 when none is active.

@@ -116,6 +116,14 @@ export const SubmitIntakeSchema = z.object({
 
 export type SubmitIntakeCommand = z.infer<typeof SubmitIntakeSchema>;
 
+// GET /intake/requests query params (api-spec §GET /intake/requests). `status` is an
+// optional DemandStatus filter, enum-validated so an unknown value is rejected as DEMAND_001.
+export const ListRequestsQuerySchema = z.object({
+  status: z.enum(DEMAND_STATUS).optional(),
+});
+
+export type ListRequestsQuery = z.infer<typeof ListRequestsQuerySchema>;
+
 export const ConfigureScoringSchema = z.object({
   name: z.string().min(1).max(200),
   criteria: z
