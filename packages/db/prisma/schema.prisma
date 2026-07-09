@@ -568,6 +568,8 @@ model Allocation {
   periodEnd              DateTime @map("period_end") @db.Date
   allocationPct          Decimal  @map("allocation_pct") @db.Decimal(5, 2)
   overAllocatedConfirmed Boolean  @default(false) @map("over_allocated_confirmed")
+  /// True once the referenced project is archived — excluded from active utilization/capacity/over-allocation.
+  archived               Boolean  @default(false) @map("archived")
   createdBy              String   @map("created_by") @db.Uuid
   createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)

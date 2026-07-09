@@ -1,12 +1,15 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query, Req } from "@nestjs/common";
 import type { Request } from "express";
 import {
   CreateResourceSchema,
   UpdateResourceSchema,
+  SetCapacityPeriodSchema,
   type CreateResourceCommand,
   type UpdateResourceCommand,
+  type SetCapacityPeriodCommand,
   type ResourceDTO,
   type ResourceListDTO,
+  type CapacityPeriodDTO,
 } from "@epm/shared";
 import { RequirePermission } from "../../../foundation/auth/decorators.js";
 import { getAuth, getRequestId } from "../../../foundation/logging/request-context.js";
@@ -67,5 +70,16 @@ export class ResourceController {
   @RequirePermission("resource:write")
   async deleteResource(@Param("id") id: string, @Req() req: Request): Promise<void> {
     return this.resourceService.deleteResource(id, getAuth(req)!, getRequestId(req));
+  }
+
+  /** BR-2: set/replace a per-month capacity override for a resource. */
+  @Put(":id/capacity-periods")
+  @RequirePermission("resource:write")
+  async setCapacityPeriod(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(SetCapacityPeriodSchema, "RESOURCE_001")) body: SetCapacityPeriodCommand,
+    @Req() req: Request,
+  ): Promise<CapacityPeriodDTO> {
+    return this.resourceService.setCapacityPeriod(id, body, getAuth(req)!, getRequestId(req));
   }
 }

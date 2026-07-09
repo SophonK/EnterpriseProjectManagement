@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { AppError } from "@epm/shared";
-import type { ResourceDTO, ResourceFilter, SkillDTO, CapacityPeriodDTO } from "@epm/shared";
+import type { ResourceDTO, ResourceFilter, ResourcePoolDTO, SkillDTO, CapacityPeriodDTO } from "@epm/shared";
 import type { AuthContext } from "@epm/shared";
 import { BaseRepository } from "../../../foundation/db/base-repository.js";
 import type { PrismaService } from "../../../foundation/db/prisma.service.js";
@@ -23,21 +23,30 @@ export class ResourceRepository extends BaseRepository {
     skills?: Array<{ name: string; level: string }>;
   }): Promise<ResourceDTO> {
     const now = new Date();
-    const row = await this.prisma.resource.create({
-      data: {
-        name: data.name,
-        email: data.email,
-        poolId: data.poolId,
-        fteCapacity: new Prisma.Decimal(data.fteCapacity),
-        createdBy: data.createdBy,
-        updatedAt: now,
-        skills: data.skills?.length
-          ? { create: data.skills.map((s) => ({ name: s.name, level: s.level })) }
-          : undefined,
-      },
-      include: { pool: true, skills: true, capacityPeriods: true },
-    });
-    return toDTO(row);
+    try {
+      const row = await this.prisma.resource.create({
+        data: {
+          name: data.name,
+          email: data.email,
+          poolId: data.poolId,
+          fteCapacity: new Prisma.Decimal(data.fteCapacity),
+          createdBy: data.createdBy,
+          updatedAt: now,
+          skills: data.skills?.length
+            ? { create: data.skills.map((s) => ({ name: s.name, level: s.level })) }
+            : undefined,
+        },
+        include: { pool: true, skills: true, capacityPeriods: true },
+      });
+      return toDTO(row);
+    } catch (err) {
+      // The `resource_email_key` UNIQUE spans soft-deleted rows too, so recreating with a
+      // previously-used email races/collides at the DB — surface RESOURCE_003 not a 500.
+      if (hasPrismaCode(err, "P2002")) {
+        throw new AppError("RESOURCE_003", `Resource with email ${data.email} already exists`);
+      }
+      throw err;
+    }
   }
 
   async findById(id: string): Promise<ResourceDTO | null> {
@@ -125,12 +134,19 @@ export class ResourceRepository extends BaseRepository {
       };
     }
 
-    const row = await this.prisma.resource.update({
-      where: { id },
-      data: updateData,
-      include: { pool: true, skills: true, capacityPeriods: true },
-    });
-    return toDTO(row);
+    try {
+      const row = await this.prisma.resource.update({
+        where: { id },
+        data: updateData,
+        include: { pool: true, skills: true, capacityPeriods: true },
+      });
+      return toDTO(row);
+    } catch (err) {
+      if (hasPrismaCode(err, "P2002")) {
+        throw new AppError("RESOURCE_003", `Resource with email ${data.email} already exists`);
+      }
+      throw err;
+    }
   }
 
   async softDelete(id: string): Promise<void> {
@@ -148,6 +164,47 @@ export class ResourceRepository extends BaseRepository {
     const count = await this.prisma.resourcePool.count({ where: { id: poolId } });
     return count > 0;
   }
+
+  async listPools(): Promise<ResourcePoolDTO[]> {
+    const rows = await this.prisma.resourcePool.findMany({ orderBy: { name: "asc" } });
+    return rows.map(poolToDTO);
+  }
+
+  async createPool(name: string): Promise<ResourcePoolDTO> {
+    const now = new Date();
+    try {
+      const row = await this.prisma.resourcePool.create({ data: { name, updatedAt: now } });
+      return poolToDTO(row);
+    } catch (err) {
+      if (hasPrismaCode(err, "P2002")) {
+        throw new AppError("RESOURCE_003", `Pool with name "${name}" already exists`);
+      }
+      throw err;
+    }
+  }
+}
+
+function hasPrismaCode(err: unknown, code: string): boolean {
+  return (
+    err != null &&
+    typeof err === "object" &&
+    "code" in err &&
+    (err as { code: string }).code === code
+  );
+}
+
+function poolToDTO(row: {
+  id: string;
+  name: string;
+  createdAt: Date;
+  updatedAt: Date;
+}): ResourcePoolDTO {
+  return {
+    id: row.id,
+    name: row.name,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
 
 // ---------------------------------------------------------------------------

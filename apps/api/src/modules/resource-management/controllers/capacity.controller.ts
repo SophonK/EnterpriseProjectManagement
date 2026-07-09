@@ -1,8 +1,13 @@
 import { Controller, Get, Query, Req } from "@nestjs/common";
 import type { Request } from "express";
-import type { CapacityDemandDTO } from "@epm/shared";
+import {
+  CapacityDemandQuerySchema,
+  type CapacityDemandDTO,
+  type CapacityDemandFilter,
+} from "@epm/shared";
 import { RequirePermission } from "../../../foundation/auth/decorators.js";
 import { getAuth } from "../../../foundation/logging/request-context.js";
+import { ZodValidationPipe } from "../../../foundation/validation/zod-validation.pipe.js";
 import { CapacityService } from "../services/capacity.service.js";
 
 @Controller("api/v1/resources/capacity-demand")
@@ -12,12 +17,9 @@ export class CapacityController {
   @Get()
   @RequirePermission("capacity:read")
   async getCapacityDemand(
-    @Query("from") from: string,
-    @Query("to") to: string,
-    @Query("poolId") poolId?: string,
-    @Query("skill") skill?: string,
+    @Query(new ZodValidationPipe(CapacityDemandQuerySchema, "RESOURCE_001")) query: CapacityDemandFilter,
     @Req() req?: Request,
   ): Promise<CapacityDemandDTO> {
-    return this.capacityService.getCapacityDemand({ from, to, poolId, skill }, getAuth(req!)!);
+    return this.capacityService.getCapacityDemand(query, getAuth(req!)!);
   }
 }

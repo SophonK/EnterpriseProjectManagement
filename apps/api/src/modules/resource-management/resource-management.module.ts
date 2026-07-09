@@ -18,6 +18,7 @@ import { CapacityService } from "./services/capacity.service.js";
 import { ResourceManagementEventSub } from "./events/resource-management-event.sub.js";
 
 import { ResourceController } from "./controllers/resource.controller.js";
+import { ResourcePoolController } from "./controllers/resource-pool.controller.js";
 import { AllocationController } from "./controllers/allocation.controller.js";
 import { UtilizationController } from "./controllers/utilization.controller.js";
 import { CapacityController } from "./controllers/capacity.controller.js";
@@ -28,6 +29,7 @@ import { ProjectService } from "../project-execution/services/project.service.js
   imports: [DbModule, AuditModule, EventsModule, AuthModule, ProjectExecutionModule],
   controllers: [
     ResourceController,
+    ResourcePoolController,
     AllocationController,
     UtilizationController,
     CapacityController,

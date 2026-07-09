@@ -27,44 +27,62 @@ export class UtilizationService {
     }
 
     const months = monthsInRange(firstOfMonth(from), firstOfMonth(to));
+    const rangeStart = months[0]!;
+    const rangeEnd = months[months.length - 1]!;
 
     const { data: resources } = await this.resourceRepo.findMany(
       { poolId: filter.poolId },
       ctx,
     );
+    const resourceIds = resources.map((r) => r.id);
 
-    const rows = await Promise.all(
-      resources.map(async (resource) => {
-        const periods = await Promise.all(
-          months.map(async (month) => {
-            const allocated = await this.allocationRepo.sumOverlapping(resource.id, month);
+    // Two grouped queries over the whole range instead of O(resources × months × 2)
+    // per-cell round-trips: all overlapping allocations + all capacity overrides.
+    const [allocations, overrides] = await Promise.all([
+      this.allocationRepo.findOverlappingForResources(resourceIds, rangeStart, rangeEnd),
+      this.capacityPeriodRepo.findForResourcesInRange(resourceIds, rangeStart, rangeEnd),
+    ]);
 
-            // Effective capacity: check capacity_period override, else fteCapacity
-            const override = await this.capacityPeriodRepo.findByResourceAndMonth(
-              resource.id,
-              month,
-            );
-            const capacity = override ? override.capacityPct : resource.fteCapacity;
+    // (resourceId|monthTime) → allocated%
+    const allocatedByCell = new Map<string, number>();
+    for (const a of allocations) {
+      const aStart = firstOfMonth(a.periodStart);
+      const aEnd = firstOfMonth(a.periodEnd);
+      for (const month of monthsInRange(aStart, aEnd)) {
+        if (month < rangeStart || month > rangeEnd) continue;
+        const key = `${a.resourceId}|${month.getTime()}`;
+        allocatedByCell.set(key, (allocatedByCell.get(key) ?? 0) + a.allocationPct);
+      }
+    }
 
-            const utilPct = capacity > 0 ? (allocated / capacity) * 100 : 0;
-            const monthStr = `${month.getUTCFullYear()}-${String(month.getUTCMonth() + 1).padStart(2, "0")}`;
+    // (resourceId|monthTime) → capacity override%
+    const overrideByCell = new Map<string, number>();
+    for (const o of overrides) {
+      overrideByCell.set(`${o.resourceId}|${firstOfMonth(o.periodStart).getTime()}`, o.capacityPct);
+    }
 
-            return {
-              month: monthStr,
-              allocatedPct: allocated,
-              band: utilizationBand(utilPct),
-            };
-          }),
-        );
-
+    const rows = resources.map((resource) => {
+      const periods = months.map((month) => {
+        const cellKey = `${resource.id}|${month.getTime()}`;
+        const allocated = allocatedByCell.get(cellKey) ?? 0;
+        const override = overrideByCell.get(cellKey);
+        const capacity = override ?? resource.fteCapacity;
+        const utilPct = capacity > 0 ? (allocated / capacity) * 100 : 0;
+        const monthStr = `${month.getUTCFullYear()}-${String(month.getUTCMonth() + 1).padStart(2, "0")}`;
         return {
-          resourceId: resource.id,
-          resourceName: resource.name,
-          poolId: resource.poolId,
-          periods,
+          month: monthStr,
+          allocatedPct: allocated,
+          band: utilizationBand(utilPct),
         };
-      }),
-    );
+      });
+
+      return {
+        resourceId: resource.id,
+        resourceName: resource.name,
+        poolId: resource.poolId,
+        periods,
+      };
+    });
 
     const fromStr = `${firstOfMonth(from).getUTCFullYear()}-${String(firstOfMonth(from).getUTCMonth() + 1).padStart(2, "0")}`;
     const toStr = `${firstOfMonth(to).getUTCFullYear()}-${String(firstOfMonth(to).getUTCMonth() + 1).padStart(2, "0")}`;

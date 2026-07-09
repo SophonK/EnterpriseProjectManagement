@@ -54,6 +54,30 @@ export class CapacityPeriodRepository extends BaseRepository {
     return rows.map(toDTO);
   }
 
+  /**
+   * All capacity overrides for a set of resources within the inclusive month range.
+   * One query — used by the utilization/capacity views to avoid per-(resource,month) lookups.
+   */
+  async findForResourcesInRange(
+    resourceIds: string[],
+    rangeStart: Date,
+    rangeEnd: Date,
+  ): Promise<Array<{ resourceId: string; periodStart: Date; capacityPct: number }>> {
+    if (resourceIds.length === 0) return [];
+    const rows = await this.prisma.capacityPeriod.findMany({
+      where: {
+        resourceId: { in: resourceIds },
+        periodStart: { gte: rangeStart, lte: rangeEnd },
+      },
+      select: { resourceId: true, periodStart: true, capacityPct: true },
+    });
+    return rows.map((r) => ({
+      resourceId: r.resourceId,
+      periodStart: r.periodStart,
+      capacityPct: Number(r.capacityPct),
+    }));
+  }
+
   async delete(id: string): Promise<void> {
     await this.prisma.capacityPeriod.delete({ where: { id } });
   }

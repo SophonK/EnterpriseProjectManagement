@@ -1,8 +1,9 @@
 import { Controller, Get, Query, Req } from "@nestjs/common";
 import type { Request } from "express";
-import type { UtilizationDTO } from "@epm/shared";
+import { UtilizationQuerySchema, type UtilizationDTO, type UtilizationFilter } from "@epm/shared";
 import { RequirePermission } from "../../../foundation/auth/decorators.js";
 import { getAuth } from "../../../foundation/logging/request-context.js";
+import { ZodValidationPipe } from "../../../foundation/validation/zod-validation.pipe.js";
 import { UtilizationService } from "../services/utilization.service.js";
 
 @Controller("api/v1/resources/utilization")
@@ -12,11 +13,9 @@ export class UtilizationController {
   @Get()
   @RequirePermission("utilization:read")
   async getUtilization(
-    @Query("from") from: string,
-    @Query("to") to: string,
-    @Query("poolId") poolId?: string,
+    @Query(new ZodValidationPipe(UtilizationQuerySchema, "RESOURCE_001")) query: UtilizationFilter,
     @Req() req?: Request,
   ): Promise<UtilizationDTO> {
-    return this.utilizationService.getUtilization({ from, to, poolId }, getAuth(req!)!);
+    return this.utilizationService.getUtilization(query, getAuth(req!)!);
   }
 }

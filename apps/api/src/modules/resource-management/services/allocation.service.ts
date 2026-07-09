@@ -185,7 +185,7 @@ export class AllocationService {
     ctx: AuthContext,
     requestId: string,
   ): Promise<AllocateResultDTO> {
-    await this.resourceRepo.findByIdOrThrow(resourceId, ctx);
+    const resource = await this.resourceRepo.findByIdOrThrow(resourceId, ctx);
     const before = await this.allocationRepo.findByIdOrThrow(id, resourceId);
 
     const periodStart = cmd.periodStart
@@ -216,21 +216,20 @@ export class AllocationService {
 
     const isOverAlloc = overAllocMonths.length > 0;
 
-    const [updated] = await this.prisma.$transaction([
-      this.prisma.allocation.update({
-        where: { id },
-        data: {
-          periodStart,
-          periodEnd,
-          allocationPct,
-          overAllocatedConfirmed: isOverAlloc,
-          updatedAt: new Date(),
-        },
-      }),
-      ...(isOverAlloc
-        ? [this.prisma.resource.update({ where: { id: resourceId }, data: { overAllocated: true, updatedAt: new Date() } })]
-        : []),
-    ]);
+    const updated = await this.prisma.allocation.update({
+      where: { id },
+      data: {
+        periodStart,
+        periodEnd,
+        allocationPct,
+        overAllocatedConfirmed: isOverAlloc,
+        updatedAt: new Date(),
+      },
+    });
+
+    // BR-6: recompute the materialised overAllocated flag across current/future months
+    // AFTER the write — an update that reduces the total must be able to CLEAR it to false.
+    await this.recomputeOverAllocatedFlag(resourceId);
 
     const allocationDTO: AllocationDTO = {
       id: updated.id,
@@ -255,9 +254,72 @@ export class AllocationService {
       requestId,
     });
 
+    // H3: allocation edits must be visible to reporting/subscribers, mirroring `allocate`.
+    await this.eventBus.publish({
+      eventId: randomUUID(),
+      eventType: RESOURCE_MANAGEMENT_EVENTS.RESOURCE_ALLOCATED,
+      occurredAt: new Date().toISOString(),
+      source: "resource-management",
+      data: {
+        allocationId: allocationDTO.id,
+        resourceId,
+        projectId: allocationDTO.projectId,
+        periodStart: allocationDTO.periodStart,
+        periodEnd: allocationDTO.periodEnd,
+        allocationPct: allocationDTO.allocationPct,
+      },
+    });
+
+    if (isOverAlloc) {
+      await this.eventBus.publish({
+        eventId: randomUUID(),
+        eventType: RESOURCE_MANAGEMENT_EVENTS.RESOURCE_OVER_ALLOCATED,
+        occurredAt: new Date().toISOString(),
+        source: "resource-management",
+        data: {
+          resourceId,
+          poolId: resource.poolId,
+          periods: overAllocMonths,
+        },
+      });
+    }
+
     const result: AllocateResultDTO = { allocation: allocationDTO };
     if (isOverAlloc) result.overAllocationWarning = { periods: overAllocMonths, requiresConfirmation: false };
     return result;
+  }
+
+  /**
+   * BR-6: recompute `resource.overAllocated` from the CURRENT persisted allocations by
+   * re-summing overlapping allocations for each current/future month (not by trusting
+   * stale stored booleans). Clears to false when no current/future month exceeds 100%.
+   * Returns the recomputed value.
+   */
+  private async recomputeOverAllocatedFlag(resourceId: string): Promise<boolean> {
+    const today = firstOfMonth(new Date());
+    const active = await this.allocationRepo.findActiveForResource(resourceId, today);
+
+    let overAllocated = false;
+    if (active.length > 0) {
+      let maxEnd = today;
+      for (const a of active) {
+        const end = firstOfMonth(new Date(a.periodEnd));
+        if (end > maxEnd) maxEnd = end;
+      }
+      for (const month of monthsInRange(today, maxEnd)) {
+        const total = await this.allocationRepo.sumOverlapping(resourceId, month);
+        if (total > 100) {
+          overAllocated = true;
+          break;
+        }
+      }
+    }
+
+    await this.prisma.resource.update({
+      where: { id: resourceId },
+      data: { overAllocated, updatedAt: new Date() },
+    });
+    return overAllocated;
   }
 
   async deleteAllocation(
@@ -271,14 +333,10 @@ export class AllocationService {
 
     await this.allocationRepo.delete(id);
 
-    // Recompute overAllocated flag: check if any current/future month still over 100%
-    const today = firstOfMonth(new Date());
-    const remaining = await this.allocationRepo.findActiveForResource(resourceId, today);
-    const stillOverAlloc = remaining.some((a) => a.overAllocatedConfirmed);
-    await this.prisma.resource.update({
-      where: { id: resourceId },
-      data: { overAllocated: stillOverAlloc, updatedAt: new Date() },
-    });
+    // BR-6: recompute by actually re-summing overlapping allocations per current/future
+    // month (not by reading stale stored `overAllocatedConfirmed` booleans) — a delete
+    // that removes the last over-alloc must CLEAR the flag to false.
+    await this.recomputeOverAllocatedFlag(resourceId);
 
     await this.auditService.record({
       actorId: ctx.userId,

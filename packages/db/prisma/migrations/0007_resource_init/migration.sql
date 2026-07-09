@@ -67,12 +67,13 @@ CREATE TABLE "resource"."allocation" (
     "period_end"              DATE         NOT NULL,
     "allocation_pct"          DECIMAL(5,2) NOT NULL,
     "over_allocated_confirmed" BOOLEAN     NOT NULL DEFAULT false,
+    "archived"                BOOLEAN      NOT NULL DEFAULT false,
     "created_by"              UUID         NOT NULL,
     "created_at"              TIMESTAMPTZ  NOT NULL DEFAULT now(),
     "updated_at"              TIMESTAMPTZ  NOT NULL,
     CONSTRAINT "allocation_pkey"              PRIMARY KEY ("id"),
     CONSTRAINT "allocation_period_check"      CHECK ("period_end" >= "period_start"),
-    CONSTRAINT "allocation_pct_check"         CHECK ("allocation_pct" > 0),
+    CONSTRAINT "allocation_pct_check"         CHECK ("allocation_pct" > 0 AND "allocation_pct" <= 200),
     CONSTRAINT "allocation_resource_fkey"     FOREIGN KEY ("resource_id")
         REFERENCES "resource"."resource"("id") ON DELETE CASCADE
 );

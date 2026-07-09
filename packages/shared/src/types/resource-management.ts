@@ -200,6 +200,19 @@ export const UpdateAllocationSchema = z
   );
 export type UpdateAllocationCommand = z.infer<typeof UpdateAllocationSchema>;
 
+/**
+ * Count of whole calendar months spanned by [from, to] inclusive of both endpoints'
+ * months. MUST match the service-side range check (calendar-month arithmetic) so the
+ * Zod gate and the service never diverge — a 30-day approximation would reject/accept
+ * ranges the service treats differently (finding: 30-day-month vs calendar-month).
+ */
+export function calendarMonthSpan(from: Date, to: Date): number {
+  return (
+    (to.getUTCFullYear() - from.getUTCFullYear()) * 12 +
+    (to.getUTCMonth() - from.getUTCMonth())
+  );
+}
+
 export const UtilizationQuerySchema = z
   .object({
     poolId: z.string().uuid().optional(),
@@ -210,13 +223,29 @@ export const UtilizationQuerySchema = z
     (v) => {
       const fromDate = new Date(v.from);
       const toDate = new Date(v.to);
-      const diffMs = toDate.getTime() - fromDate.getTime();
-      const diffMonths = diffMs / (1000 * 60 * 60 * 24 * 30);
-      return diffMonths <= 12 && toDate >= fromDate;
+      if (toDate < fromDate) return false;
+      return calendarMonthSpan(fromDate, toDate) <= 12;
     },
     { message: "Range must be between 1 and 12 months", path: ["to"] },
   );
+export type UtilizationQuery = z.infer<typeof UtilizationQuerySchema>;
 
 export const CapacityDemandQuerySchema = UtilizationQuerySchema.and(
   z.object({ skill: z.string().min(1).optional() }),
 );
+export type CapacityDemandQuery = z.infer<typeof CapacityDemandQuerySchema>;
+
+// ---------------------------------------------------------------------------
+// Resource pool + capacity-period command schemas
+// ---------------------------------------------------------------------------
+
+export const CreateResourcePoolSchema = z.object({
+  name: z.string().min(1).max(200),
+});
+export type CreateResourcePoolCommand = z.infer<typeof CreateResourcePoolSchema>;
+
+export const SetCapacityPeriodSchema = z.object({
+  periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  capacityPct: z.number().positive().max(100),
+});
+export type SetCapacityPeriodCommand = z.infer<typeof SetCapacityPeriodSchema>;

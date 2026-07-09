@@ -78,6 +78,7 @@ export class AllocationRepository extends BaseRepository {
   async sumOverlapping(resourceId: string, month: Date, excludeId?: string): Promise<number> {
     const where: Prisma.AllocationWhereInput = {
       resourceId,
+      archived: false, // archived-project allocations are excluded from active utilization
       periodStart: { lte: month },
       periodEnd: { gte: month },
       ...(excludeId ? { id: { not: excludeId } } : {}),
@@ -87,6 +88,34 @@ export class AllocationRepository extends BaseRepository {
       _sum: { allocationPct: true },
     });
     return Number(result._sum.allocationPct ?? 0);
+  }
+
+  /**
+   * All active (non-archived) allocations for a set of resources that overlap the
+   * inclusive month range [rangeStart, rangeEnd]. One query — used by the utilization
+   * and capacity views to avoid the O(resources × months) per-cell fan-out.
+   */
+  async findOverlappingForResources(
+    resourceIds: string[],
+    rangeStart: Date,
+    rangeEnd: Date,
+  ): Promise<Array<{ resourceId: string; periodStart: Date; periodEnd: Date; allocationPct: number }>> {
+    if (resourceIds.length === 0) return [];
+    const rows = await this.prisma.allocation.findMany({
+      where: {
+        resourceId: { in: resourceIds },
+        archived: false,
+        periodStart: { lte: rangeEnd },
+        periodEnd: { gte: rangeStart },
+      },
+      select: { resourceId: true, periodStart: true, periodEnd: true, allocationPct: true },
+    });
+    return rows.map((r) => ({
+      resourceId: r.resourceId,
+      periodStart: r.periodStart,
+      periodEnd: r.periodEnd,
+      allocationPct: Number(r.allocationPct),
+    }));
   }
 
   async update(
@@ -119,10 +148,10 @@ export class AllocationRepository extends BaseRepository {
     await this.prisma.allocation.delete({ where: { id } });
   }
 
-  /** Returns all current+future allocations for a resource (used to recompute overAllocated flag). */
+  /** Returns all current+future NON-archived allocations for a resource (used to recompute overAllocated flag). */
   async findActiveForResource(resourceId: string, fromDate: Date): Promise<AllocationDTO[]> {
     const rows = await this.prisma.allocation.findMany({
-      where: { resourceId, periodEnd: { gte: fromDate } },
+      where: { resourceId, archived: false, periodEnd: { gte: fromDate } },
     });
     return rows.map(toDTO);
   }

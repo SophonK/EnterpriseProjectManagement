@@ -28,4 +28,9 @@ registerErrorCodes({
     title: "Resource or allocation not found",
     type: "/errors/resource/not-found",
   },
+  RESOURCE_006: {
+    status: 403,
+    title: "Resource pool outside caller scope",
+    type: "/errors/resource/pool-forbidden",
+  },
 });

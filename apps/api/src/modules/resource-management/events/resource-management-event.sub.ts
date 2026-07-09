@@ -38,7 +38,9 @@ export class ResourceManagementEventSub {
       ),
     );
 
-    // project.archived — mark allocations for the project so they are excluded from active utilization
+    // project.archived — flag the project's allocations `archived` so they are EXCLUDED
+    // from active utilization / capacity / over-allocation. Must NOT touch
+    // overAllocatedConfirmed (that is the manager's confirmation audit flag).
     this.eventBus.subscribe(
       PROJECT_EXECUTION_EVENTS.PROJECT_ARCHIVED,
       makeIdempotent(
@@ -46,8 +48,8 @@ export class ResourceManagementEventSub {
         this.ledger,
         async (event: DomainEvent<ProjectArchivedPayload>) => {
           await this.prisma.allocation.updateMany({
-            where: { projectId: event.data.projectId },
-            data: { overAllocatedConfirmed: false, updatedAt: new Date() },
+            where: { projectId: event.data.projectId, archived: false },
+            data: { archived: true, updatedAt: new Date() },
           });
         },
       ),
