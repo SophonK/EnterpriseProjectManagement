@@ -12,6 +12,7 @@ import { DependencyRepository } from "./repositories/dependency.repository.js";
 
 import { RaidItemService } from "./services/raid-item.service.js";
 import { DependencyService } from "./services/dependency.service.js";
+import { RaidQueryService } from "./services/raid-query.service.js";
 
 import { RiskRaidEventSub } from "./events/risk-raid-event.sub.js";
 
@@ -26,10 +27,11 @@ import { DependencyController } from "./controllers/dependency.controller.js";
     DependencyRepository,
     RaidItemService,
     DependencyService,
+    RaidQueryService,
     { provide: "PROJECT_SERVICE", useExisting: ProjectService },
     RiskRaidEventSub,
   ],
-  exports: [RaidItemService, DependencyService],
+  exports: [RaidItemService, DependencyService, RaidQueryService],
 })
 export class RiskRaidModule {
   constructor(private readonly rbac: RbacRegistry) {

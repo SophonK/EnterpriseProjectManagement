@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { AppError } from "@epm/shared";
 import type { DependencyDTO, DependencyFilter } from "@epm/shared";
 import { BaseRepository } from "../../../foundation/db/base-repository.js";
@@ -34,6 +35,11 @@ export class DependencyRepository extends BaseRepository {
     super(prisma);
   }
 
+  // Cosmetic drift (out of scope — schema not edited): the `uq_dependency_pair` unique
+  // index is declared as a plain composite unique in packages/db/prisma/schema.prisma,
+  // whereas the SQL migration creates it as a PARTIAL index. This is a Prisma/migration
+  // representation mismatch only — the DB constraint (relied on by the P2002 path above)
+  // is correct. Left as-is per scope; noted here for the schema owner.
   async findByPair(fromProjectId: string, toProjectId: string): Promise<DependencyDTO | null> {
     const row = await this.prisma.dependency.findUnique({
       where: { uq_dependency_pair: { fromProjectId, toProjectId } },
@@ -47,14 +53,18 @@ export class DependencyRepository extends BaseRepository {
     return toDTO(row);
   }
 
-  async create(data: {
-    fromProjectId: string;
-    toProjectId: string;
-    description: string;
-    dependencyType: string;
-    createdBy: string;
-  }): Promise<DependencyDTO> {
-    const row = await this.prisma.dependency.create({
+  async create(
+    data: {
+      fromProjectId: string;
+      toProjectId: string;
+      description: string;
+      dependencyType: string;
+      createdBy: string;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<DependencyDTO> {
+    const client = tx ?? this.prisma;
+    const row = await client.dependency.create({
       data: {
         fromProjectId: data.fromProjectId,
         toProjectId: data.toProjectId,

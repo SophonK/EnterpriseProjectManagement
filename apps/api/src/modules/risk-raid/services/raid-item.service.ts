@@ -16,8 +16,10 @@ import type {
 } from "@epm/shared";
 import { EVENT_BUS, type EventBus } from "../../../foundation/events/event-bus.js";
 import { AuditService } from "../../../foundation/audit/audit.service.js";
+import { PrismaService } from "../../../foundation/db/prisma.service.js";
 import { RaidItemRepository } from "../repositories/raid-item.repository.js";
 import type { ProjectService } from "../../project-execution/services/project.service.js";
+import { resolveAccessibleProjectIds } from "./project-scope.js";
 
 const DEFAULT_ESCALATION_THRESHOLD = 15;
 
@@ -30,31 +32,21 @@ export class RaidItemService {
     @Inject(EVENT_BUS) private readonly eventBus: EventBus,
     private readonly auditService: AuditService,
     @Inject("PROJECT_SERVICE") private readonly projectService: ProjectService,
+    private readonly prisma: PrismaService,
   ) {
-    const envThreshold = process.env["RAID_ESCALATION_THRESHOLD"];
-    this.escalationThreshold = envThreshold ? Number(envThreshold) : DEFAULT_ESCALATION_THRESHOLD;
+    // Low finding: validate/clamp the env threshold. Number("") === 0 and
+    // Number("garbage") === NaN would otherwise silently disable escalation (>25) or
+    // over-trigger it (0). Require a finite, positive number; otherwise use the
+    // documented default (15).
+    const raw = process.env["RAID_ESCALATION_THRESHOLD"];
+    const parsed = raw != null && raw.trim() !== "" ? Number(raw) : NaN;
+    this.escalationThreshold =
+      Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_ESCALATION_THRESHOLD;
   }
 
-  /**
-   * C3: resolve the caller's accessible project ids from project-execution (the
-   * source of truth). Director/unrestricted callers ⇒ `null` (no project filter);
-   * everyone else is restricted to the projects listProjects returns under their scope.
-   *
-   * Pagination note: listProjects caps pageSize at 100, so we loop pages until we have
-   * every accessible id. For callers whose scope spans an unusually large number of
-   * projects this issues several queries, but it is correct and fail-closed (a missed
-   * page can only narrow, never widen, access).
-   */
-  private async accessibleProjectIds(ctx: AuthContext): Promise<string[] | null> {
-    if (ctx.roles.includes("EPMO_DIRECTOR")) return null;
-    const pageSize = 100;
-    const ids: string[] = [];
-    for (let page = 1; ; page++) {
-      const result = await this.projectService.listProjects({ page, pageSize }, ctx);
-      for (const p of result.data) ids.push(p.id);
-      if (page * pageSize >= result.total || result.data.length === 0) break;
-    }
-    return ids;
+  /** C3: resolve accessible project ids via the unit's shared scope resolver. */
+  private accessibleProjectIds(ctx: AuthContext): Promise<string[] | null> {
+    return resolveAccessibleProjectIds(this.projectService, ctx);
   }
 
   async createRaidItem(
@@ -67,32 +59,49 @@ export class RaidItemService {
       throw new AppError("RISK_002", `Project ${cmd.projectId} not found or not accessible`);
     });
 
-    const riskScore = computeRiskScore(cmd.severity ?? null, cmd.probability ?? null);
+    // BR-2/BR-3: score + escalation apply only to Risk-type items. For
+    // Issue/Assumption/Dependency, force severity/probability/riskScore = null and
+    // escalated = false, and never publish risk.escalated.
+    const isRisk = cmd.type === "Risk";
+    const riskScore = isRisk
+      ? computeRiskScore(cmd.severity ?? null, cmd.probability ?? null)
+      : null;
     const initialStatus = cmd.ownerId ? "InProgress" : "Open";
-    const escalated = riskScore != null && riskScore >= this.escalationThreshold;
+    const escalated = isRisk && riskScore != null && riskScore >= this.escalationThreshold;
 
-    const item = await this.raidItemRepo.create({
-      projectId: cmd.projectId,
-      type: cmd.type,
-      title: cmd.title,
-      description: cmd.description,
-      severity: cmd.severity,
-      probability: cmd.probability,
-      riskScore: riskScore ?? undefined,
-      status: initialStatus,
-      escalated,
-      ownerUserId: cmd.ownerId,
-      mitigation: cmd.mitigation,
-      createdBy: ctx.userId,
-    });
+    // Persist + audit atomically; publish only after the tx commits.
+    const item = await this.prisma.$transaction(async (tx) => {
+      const created = await this.raidItemRepo.create(
+        {
+          projectId: cmd.projectId,
+          type: cmd.type,
+          title: cmd.title,
+          description: cmd.description,
+          severity: isRisk ? cmd.severity : undefined,
+          probability: isRisk ? cmd.probability : undefined,
+          riskScore: riskScore ?? undefined,
+          status: initialStatus,
+          escalated,
+          ownerUserId: cmd.ownerId,
+          mitigation: cmd.mitigation,
+          createdBy: ctx.userId,
+        },
+        tx,
+      );
 
-    await this.auditService.record({
-      entityType: "RaidItem",
-      entityId: item.id,
-      action: "create",
-      actorId: ctx.userId,
-      requestId,
-      after: item,
+      await this.auditService.record(
+        {
+          entityType: "RaidItem",
+          entityId: created.id,
+          action: "create",
+          actorId: ctx.userId,
+          requestId,
+          after: created,
+        },
+        tx,
+      );
+
+      return created;
     });
 
     await this.eventBus.publish({
@@ -138,7 +147,11 @@ export class RaidItemService {
     const accessibleProjectIds = await this.accessibleProjectIds(ctx);
     const existing = await this.raidItemRepo.findByIdOrThrow(id, accessibleProjectIds);
 
-    // Status transition validation
+    // Status transition validation.
+    // Low finding (intended, not changed): isValidStatusTransition (in @epm/shared,
+    // off-limits) permits a direct Open → terminal jump so the system archive-cascade can
+    // close Open items. A user PATCH can therefore also jump Open → Closed/Rejected
+    // without passing through InProgress; accepted per BR-4 (terminal statuses are the gate).
     if (cmd.status && cmd.status !== existing.status) {
       if (!isValidStatusTransition(existing.status, cmd.status)) {
         throw new AppError(
@@ -148,10 +161,18 @@ export class RaidItemService {
       }
     }
 
+    // BR-2/BR-3: score + escalation apply only to Risk-type items. Type is immutable
+    // (no `type` on UpdateRaidItemCommand), so we key off the existing type: for
+    // non-Risk items force severity/probability/riskScore = null and escalated = false.
+    const isRisk = existing.type === "Risk";
     // Recompute score if severity/probability changed; use !== undefined so explicit null clears the field
-    const newSeverity = cmd.severity !== undefined ? cmd.severity : existing.severity;
-    const newProbability = cmd.probability !== undefined ? cmd.probability : existing.probability;
-    const newRiskScore = computeRiskScore(newSeverity, newProbability);
+    const newSeverity = isRisk
+      ? cmd.severity !== undefined ? cmd.severity : existing.severity
+      : null;
+    const newProbability = isRisk
+      ? cmd.probability !== undefined ? cmd.probability : existing.probability
+      : null;
+    const newRiskScore = isRisk ? computeRiskScore(newSeverity, newProbability) : null;
 
     // Auto-transition Open → InProgress if owner is being assigned
     let newStatus = cmd.status ?? existing.status;
@@ -165,32 +186,44 @@ export class RaidItemService {
     const closedBy = isTerminal && !existing.closedBy ? ctx.userId : (existing.closedBy ?? null);
     const closedAt = isTerminal && !existing.closedAt ? new Date() : (existing.closedAt ? new Date(existing.closedAt) : null);
 
-    // Re-evaluate escalation
-    const newEscalated = newRiskScore != null && newRiskScore >= this.escalationThreshold;
+    // Re-evaluate escalation (never for non-Risk types)
+    const newEscalated = isRisk && newRiskScore != null && newRiskScore >= this.escalationThreshold;
     const escalationChanged = newEscalated !== existing.escalated;
 
-    const updated = await this.raidItemRepo.update(id, {
-      title: cmd.title,
-      description: cmd.description !== undefined ? cmd.description : undefined,
-      severity: cmd.severity !== undefined ? cmd.severity : undefined,
-      probability: cmd.probability !== undefined ? cmd.probability : undefined,
-      riskScore: newRiskScore,
-      status: newStatus,
-      escalated: newEscalated,
-      ownerUserId: cmd.ownerId !== undefined ? cmd.ownerId : undefined,
-      mitigation: cmd.mitigation !== undefined ? cmd.mitigation : undefined,
-      closedBy,
-      closedAt,
-    });
+    // Persist + audit atomically; publish only after the tx commits.
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await this.raidItemRepo.update(
+        id,
+        {
+          title: cmd.title,
+          description: cmd.description !== undefined ? cmd.description : undefined,
+          severity: isRisk ? (cmd.severity !== undefined ? cmd.severity : undefined) : null,
+          probability: isRisk ? (cmd.probability !== undefined ? cmd.probability : undefined) : null,
+          riskScore: newRiskScore,
+          status: newStatus,
+          escalated: newEscalated,
+          ownerUserId: cmd.ownerId !== undefined ? cmd.ownerId : undefined,
+          mitigation: cmd.mitigation !== undefined ? cmd.mitigation : undefined,
+          closedBy,
+          closedAt,
+        },
+        tx,
+      );
 
-    await this.auditService.record({
-      entityType: "RaidItem",
-      entityId: id,
-      action: "update",
-      actorId: ctx.userId,
-      requestId,
-      before: existing,
-      after: updated,
+      await this.auditService.record(
+        {
+          entityType: "RaidItem",
+          entityId: id,
+          action: "update",
+          actorId: ctx.userId,
+          requestId,
+          before: existing,
+          after: row,
+        },
+        tx,
+      );
+
+      return row;
     });
 
     if (escalationChanged && newEscalated) {

@@ -108,46 +108,8 @@ describe("PBT P3 — score bounds and band exhaustiveness", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// PBT P4 — Circular dependency detection is order-independent
-// ---------------------------------------------------------------------------
-
-describe("PBT P4 — circular dependency detection", () => {
-  it("reverse pair is always detected regardless of project id values", () => {
-    fc.assert(
-      fc.property(
-        fc.uuid(),
-        fc.uuid().filter((id) => id !== ""),
-        (a, b) => {
-          if (a === b) return true; // skip self-loop case
-          // isCircular: does reverse pair (b→a) exist when creating (a→b)?
-          const existing = [{ from: b, to: a }];
-          const isCircular = existing.some((e) => e.from === b && e.to === a);
-          return isCircular === true;
-        },
-      ),
-      { numRuns: 50 },
-    );
-  });
-
-  it("non-circular pair not detected", () => {
-    fc.assert(
-      fc.property(
-        fc.uuid(),
-        fc.uuid(),
-        fc.uuid(),
-        (a, b, c) => {
-          if (a === b || b === c || a === c) return true;
-          // Creating a→b, existing = [a→c] — should NOT be circular
-          const existing = [{ from: a, to: c }];
-          const isCircular = existing.some((e) => e.from === b && e.to === a);
-          return isCircular === false;
-        },
-      ),
-      { numRuns: 50 },
-    );
-  });
-});
+// PBT P4 (circular dependency) was moved to dependency.service.test.ts, where it now
+// drives the REAL DependencyService.linkDependency instead of an inline reimplementation.
 
 // ---------------------------------------------------------------------------
 // Deterministic unit assertions
@@ -180,6 +142,13 @@ function makeAuditService() {
   return { record: vi.fn().mockResolvedValue(undefined) };
 }
 
+// $transaction runs its callback with a stub tx client; the repo/audit mocks ignore it.
+function makePrisma() {
+  return {
+    $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn({})),
+  };
+}
+
 function makeProjectService(rejects = false) {
   return {
     getProject: rejects
@@ -207,6 +176,7 @@ function makeService(
     makeEventBus() as never,
     makeAuditService() as never,
     makeProjectService(rejectProject) as never,
+    makePrisma() as never,
   );
 }
 
@@ -221,7 +191,7 @@ describe("RaidItemService unit assertions", () => {
 
   it("3 — escalation fires when score >= 15", async () => {
     const repo = makeRaidItemRepo({ create: vi.fn().mockResolvedValue({ ...RAID_ROW, riskScore: 16, escalated: true }) });
-    const svc = new RaidItemService(repo as never, makeEventBus() as never, makeAuditService() as never, makeProjectService() as never);
+    const svc = new RaidItemService(repo as never, makeEventBus() as never, makeAuditService() as never, makeProjectService() as never, makePrisma() as never);
     const result = await svc.createRaidItem(
       { projectId: "proj-1", type: "Risk", title: "High risk", severity: 4, probability: 4 },
       CTX, "req-1",
@@ -231,7 +201,7 @@ describe("RaidItemService unit assertions", () => {
 
   it("4 — no escalation when score < 15", async () => {
     const repo = makeRaidItemRepo({ create: vi.fn().mockResolvedValue({ ...RAID_ROW, severity: 2, probability: 3, riskScore: 6, escalated: false }) });
-    const svc = new RaidItemService(repo as never, makeEventBus() as never, makeAuditService() as never, makeProjectService() as never);
+    const svc = new RaidItemService(repo as never, makeEventBus() as never, makeAuditService() as never, makeProjectService() as never, makePrisma() as never);
     const result = await svc.createRaidItem(
       { projectId: "proj-1", type: "Risk", title: "Low risk", severity: 2, probability: 3 },
       CTX, "req-1",
@@ -276,6 +246,104 @@ describe("RaidItemService unit assertions", () => {
 });
 
 // ---------------------------------------------------------------------------
+// BR-2 / BR-3 — non-Risk items never carry a score and never escalate
+// ---------------------------------------------------------------------------
+
+describe("non-Risk escalation (BR-2/BR-3)", () => {
+  it("an Issue with high severity/probability does NOT escalate or publish risk.escalated", async () => {
+    // Repo echoes back what the service asked it to persist so we can assert the
+    // forced-null score fields and escalated=false end up on the row.
+    const create = vi.fn((data: Record<string, unknown>) => ({
+      ...RAID_ROW,
+      type: "Issue",
+      severity: data["severity"] ?? null,
+      probability: data["probability"] ?? null,
+      riskScore: data["riskScore"] ?? null,
+      escalated: data["escalated"] as boolean,
+    }));
+    const repo = makeRaidItemRepo({ create });
+    const eventBus = makeEventBus();
+    const svc = new RaidItemService(
+      repo as never,
+      eventBus as never,
+      makeAuditService() as never,
+      makeProjectService() as never,
+      makePrisma() as never,
+    );
+
+    const result = await svc.createRaidItem(
+      // deliberately pass a score-worthy severity/probability on a non-Risk type
+      { projectId: "proj-1", type: "Issue", title: "Big issue", severity: 5, probability: 5 } as never,
+      CTX,
+      "req-1",
+    );
+
+    // score fields forced null, not escalated
+    expect(result.escalated).toBe(false);
+    expect(result.riskScore).toBeNull();
+    // service must have told the repo NOT to persist a score for a non-Risk item
+    const createArg = create.mock.calls[0]![0] as Record<string, unknown>;
+    expect(createArg["severity"]).toBeUndefined();
+    expect(createArg["probability"]).toBeUndefined();
+    expect(createArg["riskScore"]).toBeUndefined();
+    expect(createArg["escalated"]).toBe(false);
+    // only raid.logged is published — never risk.escalated
+    const publishedTypes = eventBus.publish.mock.calls.map(
+      (c) => (c[0] as { eventType: string }).eventType,
+    );
+    expect(publishedTypes).toContain("risk-raid.raid.logged");
+    expect(publishedTypes).not.toContain("risk-raid.risk.escalated");
+  });
+
+  it("updating a non-Risk item forces score fields null and never escalates", async () => {
+    const update = vi.fn((_, data: Record<string, unknown>) => ({
+      ...RAID_ROW,
+      type: "Assumption",
+      severity: data["severity"] ?? null,
+      probability: data["probability"] ?? null,
+      riskScore: data["riskScore"] ?? null,
+      escalated: data["escalated"] as boolean,
+    }));
+    const eventBus = makeEventBus();
+    const svc = new RaidItemService(
+      makeRaidItemRepo({
+        findByIdOrThrow: vi.fn().mockResolvedValue({
+          ...RAID_ROW,
+          type: "Assumption",
+          severity: null,
+          probability: null,
+          riskScore: null,
+          escalated: false,
+        }),
+        update,
+      }) as never,
+      eventBus as never,
+      makeAuditService() as never,
+      makeProjectServiceWithList([]) as never, // Director path below via CTX
+      makePrisma() as never,
+    );
+
+    const result = await svc.updateRaidItem(
+      "raid-1",
+      { severity: 5, probability: 5 } as never,
+      CTX,
+      "req-1",
+    );
+
+    expect(result.escalated).toBe(false);
+    const updateArg = update.mock.calls[0]![1] as Record<string, unknown>;
+    expect(updateArg["severity"]).toBeNull();
+    expect(updateArg["probability"]).toBeNull();
+    expect(updateArg["riskScore"]).toBeNull();
+    expect(updateArg["escalated"]).toBe(false);
+    const publishedTypes = eventBus.publish.mock.calls.map(
+      (c) => (c[0] as { eventType: string }).eventType,
+    );
+    expect(publishedTypes).not.toContain("risk-raid.risk.escalated");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // C3 — scoped-role (NON-Director) access resolution
 //
 // The platform never issues project-type record scopes, so scope MUST be derived
@@ -314,6 +382,7 @@ describe("C3 — scoped-role project-id resolution", () => {
       makeEventBus() as never,
       makeAuditService() as never,
       projectService as never,
+      makePrisma() as never,
     );
 
     await svc.listRaidItems({ page: 1, pageSize: 25 }, SCOPED_CTX);
@@ -333,6 +402,7 @@ describe("C3 — scoped-role project-id resolution", () => {
       makeEventBus() as never,
       makeAuditService() as never,
       projectService as never,
+      makePrisma() as never,
     );
 
     await svc.getRaidItem("raid-1", SCOPED_CTX);
@@ -348,6 +418,7 @@ describe("C3 — scoped-role project-id resolution", () => {
       makeEventBus() as never,
       makeAuditService() as never,
       projectService as never,
+      makePrisma() as never,
     );
 
     await svc.listRaidItems({}, SCOPED_CTX);
@@ -363,6 +434,7 @@ describe("C3 — scoped-role project-id resolution", () => {
       makeEventBus() as never,
       makeAuditService() as never,
       projectService as never,
+      makePrisma() as never,
     );
 
     await svc.listRaidItems({}, CTX); // CTX is EPMO_DIRECTOR
@@ -385,6 +457,7 @@ describe("C3 — scoped-role project-id resolution", () => {
       makeEventBus() as never,
       makeAuditService() as never,
       projectService as never,
+      makePrisma() as never,
     );
 
     await svc.listRaidItems({}, SCOPED_CTX);

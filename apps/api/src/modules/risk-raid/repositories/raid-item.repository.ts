@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
-import { AppError } from "@epm/shared";
+import { Prisma } from "@prisma/client";
+import { AppError, SYSTEM_ACTOR_ID } from "@epm/shared";
 import type { RaidItemDTO, RaidFilter } from "@epm/shared";
 import { BaseRepository } from "../../../foundation/db/base-repository.js";
 import type { PrismaService } from "../../../foundation/db/prisma.service.js";
@@ -64,21 +65,25 @@ export class RaidItemRepository extends BaseRepository {
     return toDTO(row);
   }
 
-  async create(data: {
-    projectId: string;
-    type: string;
-    title: string;
-    description?: string;
-    severity?: number;
-    probability?: number;
-    riskScore?: number;
-    status: string;
-    escalated: boolean;
-    ownerUserId?: string;
-    mitigation?: string;
-    createdBy: string;
-  }): Promise<RaidItemDTO> {
-    const row = await this.prisma.raidItem.create({
+  async create(
+    data: {
+      projectId: string;
+      type: string;
+      title: string;
+      description?: string;
+      severity?: number;
+      probability?: number;
+      riskScore?: number;
+      status: string;
+      escalated: boolean;
+      ownerUserId?: string;
+      mitigation?: string;
+      createdBy: string;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<RaidItemDTO> {
+    const client = tx ?? this.prisma;
+    const row = await client.raidItem.create({
       data: {
         projectId: data.projectId,
         type: data.type,
@@ -113,8 +118,10 @@ export class RaidItemRepository extends BaseRepository {
       closedBy: string | null;
       closedAt: Date | null;
     }>,
+    tx?: Prisma.TransactionClient,
   ): Promise<RaidItemDTO> {
-    const row = await this.prisma.raidItem.update({
+    const client = tx ?? this.prisma;
+    const row = await client.raidItem.update({
       where: { id },
       data: { ...data, updatedAt: new Date() },
     });
@@ -156,12 +163,98 @@ export class RaidItemRepository extends BaseRepository {
     return [rows.map(toDTO), total];
   }
 
-  async closeAllForProject(projectId: string, closedAt: Date): Promise<number> {
-    const result = await this.prisma.raidItem.updateMany({
-      where: { projectId, status: { in: ["Open", "InProgress"] } },
-      data: { status: "Closed", closedBy: "system", closedAt, updatedAt: new Date() },
+  /**
+   * BR-8 archive cascade: close every Open/InProgress RAID item for a project and
+   * return before/after pairs so the caller can emit one audit row per closed item
+   * (action "update", actor = SYSTEM_ACTOR_ID). Reads the affected rows first (in the
+   * same tx) because `updateMany` cannot return them. Runs in its own transaction when
+   * none is supplied, so the reads, the bulk close, and (via the passed tx) the audit
+   * rows all commit atomically.
+   */
+  async closeAllForProject(
+    projectId: string,
+    closedAt: Date,
+    tx?: Prisma.TransactionClient,
+  ): Promise<Array<{ before: RaidItemDTO; after: RaidItemDTO }>> {
+    const run = async (
+      client: Prisma.TransactionClient,
+    ): Promise<Array<{ before: RaidItemDTO; after: RaidItemDTO }>> => {
+      const rows = await client.raidItem.findMany({
+        where: { projectId, status: { in: ["Open", "InProgress"] } },
+      });
+      if (rows.length === 0) return [];
+      const updatedAt = new Date();
+      await client.raidItem.updateMany({
+        where: { projectId, status: { in: ["Open", "InProgress"] } },
+        data: { status: "Closed", closedBy: SYSTEM_ACTOR_ID, closedAt, updatedAt },
+      });
+      return rows.map((row) => ({
+        before: toDTO(row),
+        after: toDTO({ ...row, status: "Closed", closedBy: SYSTEM_ACTOR_ID, closedAt, updatedAt }),
+      }));
+    };
+    return tx ? run(tx) : this.prisma.$transaction(run);
+  }
+
+  /**
+   * H7 (RaidQueryService): currently-escalated risks the caller may see, ordered by
+   * riskScore. `accessibleProjectIds === null` ⇒ Director/unrestricted (no filter);
+   * an empty array fails closed.
+   */
+  async findEscalated(
+    accessibleProjectIds: readonly string[] | null,
+    limit?: number,
+  ): Promise<RaidItemDTO[]> {
+    const scopeWhere = scopeWhereForProjects(accessibleProjectIds);
+    const rows = await this.prisma.raidItem.findMany({
+      where: { AND: [scopeWhere, { escalated: true }] },
+      orderBy: [{ riskScore: "desc" }, { createdAt: "desc" }],
+      ...(limit != null ? { take: limit } : {}),
     });
-    return result.count;
+    return rows.map(toDTO);
+  }
+
+  /**
+   * H7 (RaidQueryService): summary aggregates restricted to an explicit project-id set
+   * (the caller intersects the requested ids with the accessible set before calling, so
+   * an empty list correctly yields zeros). Returns raw pieces; banding is applied by the
+   * service via the shared `riskBand`.
+   */
+  async getSummaryData(
+    projectIds: readonly string[],
+    topLimit: number,
+  ): Promise<{
+    totalOpen: number;
+    totalEscalated: number;
+    riskScores: number[];
+    topEscalated: RaidItemDTO[];
+  }> {
+    const inProjects = { projectId: { in: [...projectIds] } };
+    const [totalOpen, totalEscalated, scoredRows, topRows] = await this.prisma.$transaction([
+      this.prisma.raidItem.count({
+        where: { AND: [inProjects, { status: { in: ["Open", "InProgress"] } }] },
+      }),
+      this.prisma.raidItem.count({
+        where: { AND: [inProjects, { escalated: true }] },
+      }),
+      this.prisma.raidItem.findMany({
+        where: { AND: [inProjects, { riskScore: { not: null } }] },
+        select: { riskScore: true },
+      }),
+      this.prisma.raidItem.findMany({
+        where: { AND: [inProjects, { escalated: true }] },
+        orderBy: [{ riskScore: "desc" }, { createdAt: "desc" }],
+        take: topLimit,
+      }),
+    ]);
+    return {
+      totalOpen,
+      totalEscalated,
+      riskScores: scoredRows
+        .map((r) => r.riskScore)
+        .filter((s): s is number => s != null),
+      topEscalated: topRows.map(toDTO),
+    };
   }
 }
 

@@ -1,8 +1,9 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
-import { PROJECT_EXECUTION_EVENTS } from "@epm/shared";
+import { PROJECT_EXECUTION_EVENTS, SYSTEM_ACTOR_ID } from "@epm/shared";
 import type { ProjectCreatedPayload, ProjectArchivedPayload, DomainEvent } from "@epm/shared";
 import { EVENT_BUS, type EventBus } from "../../../foundation/events/event-bus.js";
 import { PrismaService } from "../../../foundation/db/prisma.service.js";
+import { AuditService } from "../../../foundation/audit/audit.service.js";
 import {
   makeIdempotent,
   PrismaIdempotencyLedger,
@@ -20,6 +21,7 @@ export class RiskRaidEventSub {
     @Inject(EVENT_BUS) private readonly eventBus: EventBus,
     private readonly prisma: PrismaService,
     private readonly raidItemRepo: RaidItemRepository,
+    private readonly auditService: AuditService,
     @Optional() @Inject(RISK_RAID_IDEMPOTENCY_LEDGER) ledger?: IdempotencyLedger,
   ) {
     this.ledger = ledger ?? new PrismaIdempotencyLedger(prisma);
@@ -46,13 +48,34 @@ export class RiskRaidEventSub {
         "risk-raid.on-project-archived",
         this.ledger,
         async (event: DomainEvent<ProjectArchivedPayload>) => {
-          const count = await this.raidItemRepo.closeAllForProject(
-            event.data.projectId,
-            new Date(),
-          );
-          if (count > 0) {
+          // Close the items and emit one audit row per closed item, atomically: the
+          // bulk close and its audit trail commit in a single transaction. Actor is the
+          // SYSTEM_ACTOR_ID sentinel (this is a system-driven cascade, not a user edit).
+          const closed = await this.prisma.$transaction(async (tx) => {
+            const items = await this.raidItemRepo.closeAllForProject(
+              event.data.projectId,
+              new Date(),
+              tx,
+            );
+            for (const { before, after } of items) {
+              await this.auditService.record(
+                {
+                  entityType: "RaidItem",
+                  entityId: after.id,
+                  action: "update",
+                  actorId: SYSTEM_ACTOR_ID,
+                  requestId: event.eventId,
+                  before,
+                  after,
+                },
+                tx,
+              );
+            }
+            return items;
+          });
+          if (closed.length > 0) {
             console.info(
-              `[risk-raid] closed ${count} RAID item(s) for archived project ${event.data.projectId}`,
+              `[risk-raid] closed ${closed.length} RAID item(s) for archived project ${event.data.projectId}`,
             );
           }
         },
