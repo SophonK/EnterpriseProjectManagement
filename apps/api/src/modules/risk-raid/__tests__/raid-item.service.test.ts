@@ -7,6 +7,10 @@ import {
   isValidStatusTransition,
 } from "../../../../../../packages/shared/src/types/risk-raid.js";
 import { RaidItemService } from "../services/raid-item.service.js";
+import {
+  RaidItemRepository,
+  scopeWhereForProjects,
+} from "../repositories/raid-item.repository.js";
 
 // ---------------------------------------------------------------------------
 // PBT P1 — Risk score formula: severity × probability
@@ -268,5 +272,198 @@ describe("RaidItemService unit assertions", () => {
 
   it("10 — riskBand(6) === Medium", () => {
     expect(riskBand(6)).toBe("Medium");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C3 — scoped-role (NON-Director) access resolution
+//
+// The platform never issues project-type record scopes, so scope MUST be derived
+// from project-execution's listProjects. These tests run as a NON-Director and
+// would FAIL if the service reverted to deriving scope from ctx.recordScopes.
+// ---------------------------------------------------------------------------
+
+const SCOPED_CTX = {
+  userId: "pm-1",
+  roles: ["PROJECT_MANAGER"] as const,
+  recordScopes: [], // deliberately empty: proves scope comes from listProjects, not ctx
+};
+
+function makeProjectServiceWithList(
+  accessibleIds: string[],
+  overrides: Partial<Record<string, unknown>> = {},
+) {
+  return {
+    getProject: vi.fn().mockResolvedValue({ id: "proj-1" }),
+    listProjects: vi.fn().mockResolvedValue({
+      data: accessibleIds.map((id) => ({ id })),
+      total: accessibleIds.length,
+      page: 1,
+      pageSize: 100,
+    }),
+    ...overrides,
+  };
+}
+
+describe("C3 — scoped-role project-id resolution", () => {
+  it("listRaidItems resolves accessible ids from listProjects and passes them to findMany", async () => {
+    const repo = makeRaidItemRepo();
+    const projectService = makeProjectServiceWithList(["proj-A", "proj-B"]);
+    const svc = new RaidItemService(
+      repo as never,
+      makeEventBus() as never,
+      makeAuditService() as never,
+      projectService as never,
+    );
+
+    await svc.listRaidItems({ page: 1, pageSize: 25 }, SCOPED_CTX);
+
+    expect(projectService.listProjects).toHaveBeenCalled();
+    expect(repo.findMany).toHaveBeenCalledWith(
+      { page: 1, pageSize: 25 },
+      ["proj-A", "proj-B"],
+    );
+  });
+
+  it("getRaidItem passes the resolved accessible ids to findByIdOrThrow", async () => {
+    const repo = makeRaidItemRepo();
+    const projectService = makeProjectServiceWithList(["proj-A"]);
+    const svc = new RaidItemService(
+      repo as never,
+      makeEventBus() as never,
+      makeAuditService() as never,
+      projectService as never,
+    );
+
+    await svc.getRaidItem("raid-1", SCOPED_CTX);
+
+    expect(repo.findByIdOrThrow).toHaveBeenCalledWith("raid-1", ["proj-A"]);
+  });
+
+  it("a scoped caller with NO accessible projects gets an empty (fail-closed) id list, not null", async () => {
+    const repo = makeRaidItemRepo();
+    const projectService = makeProjectServiceWithList([]);
+    const svc = new RaidItemService(
+      repo as never,
+      makeEventBus() as never,
+      makeAuditService() as never,
+      projectService as never,
+    );
+
+    await svc.listRaidItems({}, SCOPED_CTX);
+
+    expect(repo.findMany).toHaveBeenCalledWith({}, []);
+  });
+
+  it("Director ⇒ null accessible ids (unrestricted) and listProjects is never called", async () => {
+    const repo = makeRaidItemRepo();
+    const projectService = makeProjectServiceWithList(["proj-A"]);
+    const svc = new RaidItemService(
+      repo as never,
+      makeEventBus() as never,
+      makeAuditService() as never,
+      projectService as never,
+    );
+
+    await svc.listRaidItems({}, CTX); // CTX is EPMO_DIRECTOR
+
+    expect(projectService.listProjects).not.toHaveBeenCalled();
+    expect(repo.findMany).toHaveBeenCalledWith({}, null);
+  });
+
+  it("paginates listProjects to collect ALL accessible ids across pages", async () => {
+    const repo = makeRaidItemRepo();
+    const page1 = Array.from({ length: 100 }, (_, i) => ({ id: `p${i}` }));
+    const page2 = [{ id: "p100" }, { id: "p101" }];
+    const listProjects = vi
+      .fn()
+      .mockResolvedValueOnce({ data: page1, total: 102, page: 1, pageSize: 100 })
+      .mockResolvedValueOnce({ data: page2, total: 102, page: 2, pageSize: 100 });
+    const projectService = { getProject: vi.fn(), listProjects };
+    const svc = new RaidItemService(
+      repo as never,
+      makeEventBus() as never,
+      makeAuditService() as never,
+      projectService as never,
+    );
+
+    await svc.listRaidItems({}, SCOPED_CTX);
+
+    expect(listProjects).toHaveBeenCalledTimes(2);
+    const [, ids] = repo.findMany.mock.calls[0] as [unknown, string[]];
+    expect(ids).toHaveLength(102);
+    expect(ids).toContain("p101");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C2 + C3 — repository where-shape (real RaidItemRepository against a mock prisma)
+//
+// These guard the IDOR fix directly: the scope clause and the caller-supplied
+// projectId filter MUST be ANDed, never spread onto the same `projectId` key.
+// ---------------------------------------------------------------------------
+
+function makePrismaSpy() {
+  const captured: { where?: unknown; findFirstWhere?: unknown } = {};
+  const prisma = {
+    raidItem: {
+      findMany: vi.fn((args: { where: unknown }) => {
+        captured.where = args.where;
+        return [];
+      }),
+      count: vi.fn(() => 0),
+      findFirst: vi.fn((args: { where: unknown }) => {
+        captured.findFirstWhere = args.where;
+        return null;
+      }),
+    },
+    $transaction: (ops: unknown[]) => Promise.all(ops),
+  };
+  return { prisma, captured };
+}
+
+describe("scopeWhereForProjects — pure helper", () => {
+  it("null ⇒ unrestricted {}", () => {
+    expect(scopeWhereForProjects(null)).toEqual({});
+  });
+  it("empty array ⇒ fail-closed { projectId: { in: [] } }", () => {
+    expect(scopeWhereForProjects([])).toEqual({ projectId: { in: [] } });
+  });
+  it("ids ⇒ { projectId: { in: ids } }", () => {
+    expect(scopeWhereForProjects(["proj-A"])).toEqual({ projectId: { in: ["proj-A"] } });
+  });
+});
+
+describe("RaidItemRepository.findMany — C2 scope/filter ANDing", () => {
+  it("ANDs scope with a caller-supplied projectId filter (no overwrite/IDOR)", async () => {
+    const { prisma, captured } = makePrismaSpy();
+    const repo = new RaidItemRepository(prisma as never);
+
+    // caller is scoped to proj-A/proj-B but requests ?projectId=proj-EVIL
+    await repo.findMany({ projectId: "proj-EVIL" }, ["proj-A", "proj-B"]);
+
+    // scope clause must still be present AND the projectId filter is a SEPARATE term,
+    // so the query resolves to (projectId in [A,B]) AND (projectId = EVIL) ⇒ no rows.
+    expect(captured.where).toEqual({
+      AND: [
+        { projectId: { in: ["proj-A", "proj-B"] } },
+        { projectId: "proj-EVIL" },
+      ],
+    });
+    // regression guard: scope must NOT have been overwritten by the raw projectId
+    expect(captured.where).not.toEqual({ projectId: "proj-EVIL" });
+  });
+
+  it("findByIdOrThrow ANDs the scope clause with the id lookup", async () => {
+    const { prisma, captured } = makePrismaSpy();
+    const repo = new RaidItemRepository(prisma as never);
+
+    await expect(
+      repo.findByIdOrThrow("raid-1", ["proj-A"]),
+    ).rejects.toMatchObject({ code: "RISK_004" });
+
+    expect(captured.findFirstWhere).toEqual({
+      AND: [{ projectId: { in: ["proj-A"] } }, { id: "raid-1" }],
+    });
   });
 });

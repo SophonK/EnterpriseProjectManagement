@@ -35,6 +35,28 @@ export class RaidItemService {
     this.escalationThreshold = envThreshold ? Number(envThreshold) : DEFAULT_ESCALATION_THRESHOLD;
   }
 
+  /**
+   * C3: resolve the caller's accessible project ids from project-execution (the
+   * source of truth). Director/unrestricted callers ⇒ `null` (no project filter);
+   * everyone else is restricted to the projects listProjects returns under their scope.
+   *
+   * Pagination note: listProjects caps pageSize at 100, so we loop pages until we have
+   * every accessible id. For callers whose scope spans an unusually large number of
+   * projects this issues several queries, but it is correct and fail-closed (a missed
+   * page can only narrow, never widen, access).
+   */
+  private async accessibleProjectIds(ctx: AuthContext): Promise<string[] | null> {
+    if (ctx.roles.includes("EPMO_DIRECTOR")) return null;
+    const pageSize = 100;
+    const ids: string[] = [];
+    for (let page = 1; ; page++) {
+      const result = await this.projectService.listProjects({ page, pageSize }, ctx);
+      for (const p of result.data) ids.push(p.id);
+      if (page * pageSize >= result.total || result.data.length === 0) break;
+    }
+    return ids;
+  }
+
   async createRaidItem(
     cmd: CreateRaidItemCommand,
     ctx: AuthContext,
@@ -113,7 +135,8 @@ export class RaidItemService {
     ctx: AuthContext,
     requestId: string,
   ): Promise<RaidItemDTO> {
-    const existing = await this.raidItemRepo.findByIdOrThrow(id, ctx);
+    const accessibleProjectIds = await this.accessibleProjectIds(ctx);
+    const existing = await this.raidItemRepo.findByIdOrThrow(id, accessibleProjectIds);
 
     // Status transition validation
     if (cmd.status && cmd.status !== existing.status) {
@@ -190,11 +213,13 @@ export class RaidItemService {
   }
 
   async getRaidItem(id: string, ctx: AuthContext): Promise<RaidItemDTO> {
-    return this.raidItemRepo.findByIdOrThrow(id, ctx);
+    const accessibleProjectIds = await this.accessibleProjectIds(ctx);
+    return this.raidItemRepo.findByIdOrThrow(id, accessibleProjectIds);
   }
 
   async listRaidItems(filter: RaidFilter, ctx: AuthContext): Promise<RaidListDTO> {
-    const [data, total] = await this.raidItemRepo.findMany(filter, ctx);
+    const accessibleProjectIds = await this.accessibleProjectIds(ctx);
+    const [data, total] = await this.raidItemRepo.findMany(filter, accessibleProjectIds);
     return {
       data,
       total,
@@ -204,7 +229,8 @@ export class RaidItemService {
   }
 
   async deleteRaidItem(id: string, ctx: AuthContext, requestId: string): Promise<void> {
-    const existing = await this.raidItemRepo.findByIdOrThrow(id, ctx);
+    const accessibleProjectIds = await this.accessibleProjectIds(ctx);
+    const existing = await this.raidItemRepo.findByIdOrThrow(id, accessibleProjectIds);
     await this.raidItemRepo.delete(id);
     await this.auditService.record({
       entityType: "RaidItem",

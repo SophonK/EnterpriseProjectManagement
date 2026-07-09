@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { AppError } from "@epm/shared";
-import type { AuthContext, RaidItemDTO, RaidFilter } from "@epm/shared";
+import type { RaidItemDTO, RaidFilter } from "@epm/shared";
 import { BaseRepository } from "../../../foundation/db/base-repository.js";
 import type { PrismaService } from "../../../foundation/db/prisma.service.js";
 
@@ -52,18 +52,13 @@ export class RaidItemRepository extends BaseRepository {
     super(prisma);
   }
 
-  buildScopeWhere(ctx: AuthContext): object {
-    if (ctx.roles.includes("EPMO_DIRECTOR")) return {};
-    const projectIds = ctx.recordScopes
-      .filter((s) => s.type === "project")
-      .flatMap((s) => s.ids ?? []);
-    return { projectId: { in: projectIds } };
-  }
-
-  async findByIdOrThrow(id: string, ctx: AuthContext): Promise<RaidItemDTO> {
-    const scopeWhere = this.buildScopeWhere(ctx);
+  async findByIdOrThrow(
+    id: string,
+    accessibleProjectIds: readonly string[] | null,
+  ): Promise<RaidItemDTO> {
+    const scopeWhere = scopeWhereForProjects(accessibleProjectIds);
     const row = await this.prisma.raidItem.findFirst({
-      where: { id, ...scopeWhere },
+      where: { AND: [scopeWhere, { id }] },
     });
     if (!row) throw new AppError("RISK_004", `RAID item ${id} not found`);
     return toDTO(row);
@@ -132,15 +127,20 @@ export class RaidItemRepository extends BaseRepository {
 
   async findMany(
     filter: RaidFilter,
-    ctx: AuthContext,
+    accessibleProjectIds: readonly string[] | null,
   ): Promise<[RaidItemDTO[], number]> {
-    const scopeWhere = this.buildScopeWhere(ctx);
+    const scopeWhere = scopeWhereForProjects(accessibleProjectIds);
+    // C2: the caller-supplied projectId filter must be ANDed with the scope, never
+    // spread onto the same `projectId` key (which would overwrite the scope and allow
+    // an IDOR bypass via ?projectId=). Every filter clause is its own AND term.
     const where = {
-      ...scopeWhere,
-      ...(filter.projectId ? { projectId: filter.projectId } : {}),
-      ...(filter.type ? { type: filter.type } : {}),
-      ...(filter.status ? { status: filter.status } : {}),
-      ...(filter.escalated != null ? { escalated: filter.escalated } : {}),
+      AND: [
+        scopeWhere,
+        ...(filter.projectId ? [{ projectId: filter.projectId }] : []),
+        ...(filter.type ? [{ type: filter.type }] : []),
+        ...(filter.status ? [{ status: filter.status }] : []),
+        ...(filter.escalated != null ? [{ escalated: filter.escalated }] : []),
+      ],
     };
     const page = filter.page ?? 1;
     const pageSize = Math.min(filter.pageSize ?? 25, 100);
@@ -163,4 +163,23 @@ export class RaidItemRepository extends BaseRepository {
     });
     return result.count;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Scope helper
+// ---------------------------------------------------------------------------
+
+/**
+ * C3: RAID items are scoped by the caller's accessible project ids, resolved from
+ * project-execution (the source of truth). The platform never issues project-type
+ * record scopes, so we cannot derive scope from ctx.recordScopes here.
+ *
+ * `null` ⇒ Director / unrestricted (match everything). An empty array fails closed
+ * (`{ projectId: { in: [] } }` matches nothing).
+ */
+export function scopeWhereForProjects(
+  accessibleProjectIds: readonly string[] | null,
+): object {
+  if (accessibleProjectIds === null) return {};
+  return { projectId: { in: [...accessibleProjectIds] } };
 }

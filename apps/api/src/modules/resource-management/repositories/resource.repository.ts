@@ -156,10 +156,12 @@ export class ResourceRepository extends BaseRepository {
 
 export function buildResourceScopeWhere(ctx: AuthContext): Prisma.ResourceWhereInput {
   if (ctx.roles.includes("EPMO_DIRECTOR")) return {};
+  // C1: real RecordScope shape is { type: ScopeType; ids?; subtreeRootId? }; the pool scope
+  // type is "resource-pool" (not "pool"), the id list is `ids` (not `.id`), and an empty scope
+  // must DENY (fail closed) — the old `return {}` matched every pool (cross-tenant leak).
   const poolIds = ctx.recordScopes
-    .filter((s) => (s as { type: string; id: string }).type === "pool")
-    .map((s) => (s as { type: string; id: string }).id);
-  if (poolIds.length === 0) return {};
+    .filter((s) => s.type === "resource-pool")
+    .flatMap((s) => [...(s.ids ?? []), ...(s.subtreeRootId ? [s.subtreeRootId] : [])]);
   return { poolId: { in: poolIds } };
 }
 
