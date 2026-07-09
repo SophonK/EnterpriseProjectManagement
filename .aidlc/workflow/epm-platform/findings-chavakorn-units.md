@@ -3,6 +3,8 @@
 **Reviewer**: Tech Lead (Sophon) · **Date**: 2026-07-08 · **Method**: 4 parallel adversarial reviewers (3 per-unit + cross-cutting), findings verified against source/specs and real foundation types.
 **Verdict**: **BLOCK** — 3 verified authorization Criticals (already merged to `main`, HEAD `1239088`), plus 7 High and multiple Medium/Low. Build/typecheck/254 tests are green — **none of the Criticals are test-covered** (systemic: hollow PBT, all-Director tests, mocked `buildScopeWhere`).
 
+> **UPDATE (commit `04efb29`): C1, C2, C3, and H4 FIXED by Sophon** — with 19 new non-Director scoped-role tests (reverting any fix fails its guard). Full suite 273/273 green. **Remaining: H1, H2, H3, H5, H6, H7 + all Mediums/Lows + the test-quality rebuild are still open and deferred to Chavakorn** (details below). The hollow PBT / all-Director tests in resource & risk still need rewriting so the correctness properties are actually verified.
+
 > Root theme: record-scoping was implemented against a wrong mental model of `RecordScope` (real shape `{ type: ScopeType('portfolio'|'program'|'project'|'resource-pool'); ids?; subtreeRootId? }`) and the platform only ever issues **`portfolio`**-type scopes (see `project.repository.ts:170-179`). Correct idiom to copy: project-execution's `buildScopeWhere`.
 
 ---
