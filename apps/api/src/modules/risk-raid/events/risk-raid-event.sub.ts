@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { PROJECT_EXECUTION_EVENTS } from "@epm/shared";
-import type { ProjectCreatedPayload, ProjectArchivedPayload } from "@epm/shared";
-import { EVENT_BUS, type EventBus, type DomainEventEnvelope } from "../../../foundation/events/event-bus.js";
+import type { ProjectCreatedPayload, ProjectArchivedPayload, DomainEvent } from "@epm/shared";
+import { EVENT_BUS, type EventBus } from "../../../foundation/events/event-bus.js";
 import { PrismaService } from "../../../foundation/db/prisma.service.js";
 import {
   makeIdempotent,
@@ -33,7 +33,7 @@ export class RiskRaidEventSub {
       makeIdempotent(
         "risk-raid.on-project-created",
         this.ledger,
-        async (_event: DomainEventEnvelope<ProjectCreatedPayload>) => {
+        async (_event: DomainEvent<ProjectCreatedPayload>) => {
           // No domain action needed.
         },
       ),
@@ -45,7 +45,7 @@ export class RiskRaidEventSub {
       makeIdempotent(
         "risk-raid.on-project-archived",
         this.ledger,
-        async (event: DomainEventEnvelope<ProjectArchivedPayload>) => {
+        async (event: DomainEvent<ProjectArchivedPayload>) => {
           const count = await this.raidItemRepo.closeAllForProject(
             event.data.projectId,
             new Date(),

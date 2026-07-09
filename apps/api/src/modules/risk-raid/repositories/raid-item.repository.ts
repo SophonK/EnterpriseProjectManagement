@@ -55,8 +55,8 @@ export class RaidItemRepository extends BaseRepository {
   buildScopeWhere(ctx: AuthContext): object {
     if (ctx.roles.includes("EPMO_DIRECTOR")) return {};
     const projectIds = ctx.recordScopes
-      .filter((s) => s.entity === "project")
-      .map((s) => s.id);
+      .filter((s) => s.type === "project")
+      .flatMap((s) => s.ids ?? []);
     return { projectId: { in: projectIds } };
   }
 
