@@ -5,6 +5,11 @@ import { RequirePermission } from "../../../foundation/auth/decorators.js";
 import { getAuth } from "../../../foundation/logging/request-context.js";
 import { DashboardService } from "../services/dashboard.service.js";
 
+// Permission-doc note (Low): nfr.md's security row summarises all handlers as
+// `@RequirePermission("dashboard:read")`, but api-spec.md gates each dataset on its own
+// permission (capacity → utilization:read, risk-summary → raid:read). The api-spec is
+// authoritative and the per-endpoint decorators below (and the export.controller H4 gate)
+// implement it; the nfr.md wording is a stale over-simplification, not a behavior change.
 @Controller("api/v1/dashboards")
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}

@@ -99,6 +99,37 @@ describe("toCsv — deterministic", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// CSV formula injection — free-text RAID titles / names must be neutralized so a
+// spreadsheet does not execute them (Medium finding).
+// ---------------------------------------------------------------------------
+
+describe("toCsv — formula injection defense", () => {
+  it("neutralizes a =cmd() title by prefixing a single quote", () => {
+    const csv = toCsv([{ title: "=cmd()|'/c calc'!A1" }]);
+    const dataLine = csv.split("\n")[1]!;
+    // Prefixed with ' so it is treated as literal text; the leading char is no longer '='.
+    expect(dataLine.startsWith("=")).toBe(false);
+    expect(dataLine).toContain("'=cmd()");
+  });
+
+  it.each(["=1+1", "+1", "-1", "@SUM(A1)", "\tTAB", "\rCR"])(
+    "neutralizes a leading formula-trigger character (%j)",
+    (payload) => {
+      const csv = toCsv([{ v: payload }]);
+      const cell = csv.split("\n")[1]!;
+      // The raw payload's first char must not begin the emitted cell (a quote was prepended,
+      // possibly inside RFC-4180 double-quoting for tab/CR which don't need it but stay safe).
+      const firstMeaningfulChar = cell.replace(/^"/, "")[0];
+      expect(firstMeaningfulChar).toBe("'");
+    },
+  );
+
+  it("leaves a benign leading character untouched", () => {
+    expect(toCsv([{ v: "Normal title" }])).toBe("v\nNormal title");
+  });
+});
+
 describe("ExportService — deterministic", () => {
   const svc = new ExportService();
 

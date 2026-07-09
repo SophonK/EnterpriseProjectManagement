@@ -1,9 +1,22 @@
 import { Injectable } from "@nestjs/common";
 import { AppError, EXPORT_ROW_LIMIT } from "@epm/shared";
 
-/** Escape a single CSV cell value. */
+/**
+ * Leading characters a spreadsheet application (Excel / Sheets / LibreOffice) will
+ * interpret as the start of a formula. Free-text user input (RAID titles, project /
+ * resource names) flows into the CSV, so a cell like `=cmd()` or `@SUM(...)` must be
+ * neutralized to prevent CSV formula injection.
+ */
+const CSV_FORMULA_TRIGGERS = new Set(["=", "+", "-", "@", "\t", "\r"]);
+
+/** Escape a single CSV cell value (formula-injection safe + RFC-4180 quoting). */
 function escapeCsvCell(value: unknown): string {
-  const s = String(value ?? "");
+  let s = String(value ?? "");
+  // CSV formula injection: if the cell would be read as a formula, prefix a single quote
+  // so the spreadsheet treats it as literal text instead of executing it.
+  if (s.length > 0 && CSV_FORMULA_TRIGGERS.has(s[0]!)) {
+    s = `'${s}`;
+  }
   if (s.includes(",") || s.includes('"') || s.includes("\n")) {
     return `"${s.replace(/"/g, '""')}"`;
   }

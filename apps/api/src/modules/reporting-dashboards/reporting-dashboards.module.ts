@@ -15,11 +15,13 @@ import { ExportController } from "./controllers/export.controller.js";
   imports: [
     DbModule,
     AuthModule,
-    // Provides ProjectQueryService (rollup + at-risk projects)
+    // Provides ProjectQueryService (rollup + at-risk projects) and ProjectService
+    // (scoped listProjects → resolves the viewed portfolio's accessible project ids, H6)
     ProjectExecutionModule,
     // Provides UtilizationService (capacity heatmap)
     ResourceManagementModule,
-    // Provides RaidItemService (risk summary + top escalated)
+    // Provides RaidItemService (risk summary list) and RaidQueryService
+    // (record-scoped getRaidSummary → portfolio-scoped top escalated risks, H6)
     RiskRaidModule,
   ],
   controllers: [DashboardController, ExportController],
