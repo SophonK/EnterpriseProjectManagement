@@ -1,4 +1,4 @@
-import type { PrismaService } from "./prisma.service.js";
+import { PrismaService } from "./prisma.service.js";
 
 /** The bounded-context schemas. A repository declares the one it owns. */
 export type UnitSchema =

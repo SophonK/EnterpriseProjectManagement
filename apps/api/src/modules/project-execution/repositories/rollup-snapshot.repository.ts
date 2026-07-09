@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type { RollupSummaryDTO } from "@epm/shared";
 import { BaseRepository } from "../../../foundation/db/base-repository.js";
-import type { PrismaService } from "../../../foundation/db/prisma.service.js";
+import { PrismaService } from "../../../foundation/db/prisma.service.js";
 
 @Injectable()
 export class RollupSnapshotRepository extends BaseRepository {

@@ -4,7 +4,7 @@ import { AppError } from "@epm/shared";
 import type { ProjectDTO, ProjectFilter } from "@epm/shared";
 import type { AuthContext } from "@epm/shared";
 import { BaseRepository } from "../../../foundation/db/base-repository.js";
-import type { PrismaService } from "../../../foundation/db/prisma.service.js";
+import { PrismaService } from "../../../foundation/db/prisma.service.js";
 
 @Injectable()
 export class ProjectRepository extends BaseRepository {

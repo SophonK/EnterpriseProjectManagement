@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { AppError, SYSTEM_ACTOR_ID } from "@epm/shared";
 import type { RaidItemDTO, RaidFilter } from "@epm/shared";
 import { BaseRepository } from "../../../foundation/db/base-repository.js";
-import type { PrismaService } from "../../../foundation/db/prisma.service.js";
+import { PrismaService } from "../../../foundation/db/prisma.service.js";
 
 function toDTO(row: {
   id: string;

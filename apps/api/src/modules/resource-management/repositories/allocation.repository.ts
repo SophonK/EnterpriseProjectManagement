@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { AppError } from "@epm/shared";
 import type { AllocationDTO } from "@epm/shared";
 import { BaseRepository } from "../../../foundation/db/base-repository.js";
-import type { PrismaService } from "../../../foundation/db/prisma.service.js";
+import { PrismaService } from "../../../foundation/db/prisma.service.js";
 
 @Injectable()
 export class AllocationRepository extends BaseRepository {
