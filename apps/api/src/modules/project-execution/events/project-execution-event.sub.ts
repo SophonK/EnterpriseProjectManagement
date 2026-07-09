@@ -10,6 +10,7 @@ import { PrismaService } from "../../../foundation/db/prisma.service.js";
 import { ProjectService } from "../services/project.service.js";
 import { RollupService } from "../services/rollup.service.js";
 import type { DomainEvent, StatusChangedPayload, Role } from "@epm/shared";
+import { SYSTEM_ACTOR_ID } from "@epm/shared";
 
 /** DI token — override in tests with InMemoryIdempotencyLedger */
 export const EXECUTION_IDEMPOTENCY_LEDGER = Symbol("EXECUTION_IDEMPOTENCY_LEDGER");
@@ -47,7 +48,7 @@ export class ProjectExecutionEventSub implements OnModuleInit {
         this.ledger,
         async (event: DomainEvent<DemandPromotedPayload>) => {
           const systemCtx = {
-            userId: "system",
+            userId: SYSTEM_ACTOR_ID,
             roles: ["EPMO_DIRECTOR"] as Role[],
             recordScopes: [],
           };

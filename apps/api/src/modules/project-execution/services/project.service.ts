@@ -173,6 +173,11 @@ export class ProjectService {
     return this.projectRepo.findByIdScoped(id, ctx);
   }
 
+  /** Existence-only check with no record-scope enforcement (for cross-project soft-FK validation). */
+  async getProjectById(id: string): Promise<ProjectDTO> {
+    return this.projectRepo.findByIdOrThrow(id);
+  }
+
   async listProjects(filter: ProjectFilter, ctx: AuthContext): Promise<ProjectListDTO> {
     const { data, total } = await this.projectRepo.findMany(filter, ctx);
     return {

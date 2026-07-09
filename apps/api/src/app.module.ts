@@ -12,6 +12,9 @@ import { RequestIdMiddleware } from "./foundation/logging/request-id.middleware.
 import { StrategyPortfolioModule } from "./modules/strategy-portfolio/strategy-portfolio.module.js";
 import { ProjectExecutionModule } from "./modules/project-execution/project-execution.module.js";
 import { DemandIntakeModule } from "./modules/demand-intake/demand-intake.module.js";
+import { ResourceManagementModule } from "./modules/resource-management/resource-management.module.js";
+import { RiskRaidModule } from "./modules/risk-raid/risk-raid.module.js";
+import { ReportingDashboardsModule } from "./modules/reporting-dashboards/reporting-dashboards.module.js";
 
 /**
  * Composition root. Foundation modules (config, logging, db, auth, events, audit,
@@ -35,6 +38,12 @@ import { DemandIntakeModule } from "./modules/demand-intake/demand-intake.module
     // demand-intake publishes demand-intake.demand.* — registered AFTER project-execution,
     // whose subscriber consumes demand-intake.demand.promoted to create the Project.
     DemandIntakeModule,
+    // resource-management registered AFTER project-execution (soft-FK validates projectId via ProjectService)
+    ResourceManagementModule,
+    // risk-raid registered AFTER project-execution (soft-FK validates projectId via ProjectService)
+    RiskRaidModule,
+    // reporting-dashboards last — reads from all other domain units
+    ReportingDashboardsModule,
   ],
   controllers: [],
   providers: [],
