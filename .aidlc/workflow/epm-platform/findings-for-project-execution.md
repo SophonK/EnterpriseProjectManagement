@@ -1,5 +1,8 @@
 # Findings for project-execution (owner: Chavakorn)
 
+> **STATUS: ALL RESOLVED (2026-07-08).** C1 fixed on Chavakorn's branch (`ea5143e`, NIL UUID sentinel). H3 + C2 fixed by Sophon (`85f4c27`): plannedBudget now flows into the ProjectCreated payload → investment-mix budget populated; promote uses the new strict `EventBus.dispatch()` inside its transaction so a downstream failure rolls back (retryable) instead of orphaning. Full api suite 254/254 green. Details below kept for the record.
+
+
 Surfaced during the Tech-Lead code review of strategy-portfolio + demand-intake (2026-07-08).
 These live in **your** unit / the cross-unit event contract, so they're handed to you rather than fixed by Sophon. The demand→project promote flow (US-032) does not work end-to-end on a real database until C1 is fixed.
 
