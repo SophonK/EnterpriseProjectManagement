@@ -143,3 +143,4 @@
 - [2026-07-08] strategy-portfolio: implement COMPLETE (37/37 tasks, 70 unit tests green, 139/139 api suite) — autonomous
 - [2026-07-08] demand-intake: design (expanded) approved — 12 design files, autonomous
 - [2026-07-08] demand-intake: implement COMPLETE (34/34 tasks, 65 unit tests green, 204/204 api suite) — autonomous
+- [2026-07-08] code-review (strategy-portfolio + demand-intake): 1 Critical + 6 High found; Tier-A (6 High + 5 mediums) FIXED in 6416899, suite 216/216 green; C1/H3/C2 deferred to project-execution (Chavakorn) — see findings-for-project-execution.md
