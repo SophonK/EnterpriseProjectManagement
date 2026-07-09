@@ -3,7 +3,13 @@
 **Reviewer**: Tech Lead (Sophon) · **Date**: 2026-07-08 · **Method**: 4 parallel adversarial reviewers (3 per-unit + cross-cutting), findings verified against source/specs and real foundation types.
 **Verdict**: **BLOCK** — 3 verified authorization Criticals (already merged to `main`, HEAD `1239088`), plus 7 High and multiple Medium/Low. Build/typecheck/254 tests are green — **none of the Criticals are test-covered** (systemic: hollow PBT, all-Director tests, mocked `buildScopeWhere`).
 
-> **UPDATE (commit `04efb29`): C1, C2, C3, and H4 FIXED by Sophon** — with 19 new non-Director scoped-role tests (reverting any fix fails its guard). Full suite 273/273 green. **Remaining: H1, H2, H3, H5, H6, H7 + all Mediums/Lows + the test-quality rebuild are still open and deferred to Chavakorn** (details below). The hollow PBT / all-Director tests in resource & risk still need rewriting so the correctness properties are actually verified.
+> **UPDATE — ALL RESOLVED by Sophon.**
+> - Auth Criticals + export gate (`04efb29`): C1, C2, C3, H4 + 19 scoped-role tests.
+> - resource-management (`f28ab35`): H1 (pool-scope on write), H2 (archived-allocation exclusion + migration), H3 (update events) + all Mediums (Zod validation, flag-clear recompute, P2002→RESOURCE_003, N+1, `/resource-pools` + capacity-period endpoints) + hollow-PBT rewrite.
+> - risk-raid (`f9658f0`): H7 (RaidQueryService) + non-Risk escalation guard, archive-cascade audit (SYSTEM_ACTOR_ID), P2002 dependency handling, transactional mutations, threshold clamp + DependencyService tests + cycle-PBT rewrite.
+> - reporting-dashboards (`496bcf2`): H5 (full risk export, no silent truncation), H6 (portfolio-scoped top risks via RaidQueryService), CSV formula-injection guard, alignment-count scope guard + getExportRows/REPORT_003 tests.
+>
+> **Full api suite 328/328 green, typecheck clean.** The systemic test-quality gap (all-Director tests, hollow PBT) was rebuilt: every fix ships with a non-Director scoped test. Only runtime-deferred items remain across the platform (live Postgres migrate, Testcontainers int-test execution, OIDC/IdP).
 
 > Root theme: record-scoping was implemented against a wrong mental model of `RecordScope` (real shape `{ type: ScopeType('portfolio'|'program'|'project'|'resource-pool'); ids?; subtreeRootId? }`) and the platform only ever issues **`portfolio`**-type scopes (see `project.repository.ts:170-179`). Correct idiom to copy: project-execution's `buildScopeWhere`.
 
