@@ -9,23 +9,63 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { Test } from "@nestjs/testing";
-import * as request from "supertest";
+import request from "supertest";
 import type { INestApplication } from "@nestjs/common";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import {
   DEMAND_INTAKE_EVENTS,
+  type AuthContext,
   type DemandPromotedPayload,
   type DomainEvent,
+  type Role,
 } from "@epm/shared";
 import { AppModule } from "../../../app.module.js";
 import { EVENT_BUS, type EventBus } from "../../../foundation/events/event-bus.js";
 import { PrismaService } from "../../../foundation/db/prisma.service.js";
+import { ConfigService } from "../../../foundation/config/config.service.js";
+import { TokenVerifier } from "../../../foundation/auth/token-verifier.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const DB_PKG_ROOT = join(process.cwd(), "..", "..", "packages", "db");
+
+/**
+ * When set, integration tests run against this already-migrated local Postgres
+ * instead of spinning up a Testcontainers Postgres (no Docker required).
+ */
+const INT_DATABASE_URL = process.env.INT_DATABASE_URL;
+
+/** A fully-valid ConfigService bound to the test DB (Testcontainers or local). */
+function makeTestConfig(dbUrl: string): ConfigService {
+  return new ConfigService({
+    NODE_ENV: "test",
+    DATABASE_URL: dbUrl,
+    OIDC_ISSUER: "https://test.example.com/",
+    OIDC_CLIENT_ID: "epm-test",
+    OIDC_CLIENT_SECRET: "test-secret",
+    OIDC_REDIRECT_URI: "https://test.example.com/callback",
+  });
+}
+
+/** Decodes the `fake.<base64>` test JWT without a real OIDC issuer. */
+function fakeTokenVerifier(): Pick<TokenVerifier, "verify"> {
+  return {
+    verify: (token: string): Promise<AuthContext> => {
+      if (!token.startsWith("fake.")) throw new Error("Unauthorized");
+      const payload = JSON.parse(Buffer.from(token.slice(5), "base64").toString()) as {
+        userId: string;
+        roles: string[];
+      };
+      return Promise.resolve({
+        userId: payload.userId,
+        roles: payload.roles as Role[],
+        recordScopes: [],
+      });
+    },
+  };
+}
 
 let dockerAvailable = true;
 let container: StartedPostgreSqlContainer | undefined;
@@ -41,58 +81,51 @@ function makeFakeJwt(ctx: { userId: string; roles: string[] }): string {
   return `fake.${Buffer.from(JSON.stringify(ctx)).toString("base64")}`;
 }
 
-const DIRECTOR_TOKEN = makeFakeJwt({ userId: "user-director", roles: ["EPMO_DIRECTOR"] });
-const PM_A_TOKEN     = makeFakeJwt({ userId: "user-pm-a",     roles: ["PORTFOLIO_MANAGER"] });
-const PM_B_TOKEN     = makeFakeJwt({ userId: "user-pm-b",     roles: ["PORTFOLIO_MANAGER"] });
+// User ids must be UUIDs — actor/owner/submitter columns are `@db.Uuid`.
+const DIRECTOR_ID = "d0000000-0000-4000-8000-000000000001";
+const PM_A_ID     = "a0000000-0000-4000-8000-000000000002";
+const PM_B_ID     = "b0000000-0000-4000-8000-000000000003";
+
+const DIRECTOR_TOKEN = makeFakeJwt({ userId: DIRECTOR_ID, roles: ["EPMO_DIRECTOR"] });
+const PM_A_TOKEN     = makeFakeJwt({ userId: PM_A_ID,     roles: ["PORTFOLIO_MANAGER"] });
+const PM_B_TOKEN     = makeFakeJwt({ userId: PM_B_ID,     roles: ["PORTFOLIO_MANAGER"] });
 
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
 beforeAll(async () => {
-  try {
-    container = await new PostgreSqlContainer("postgres:16-alpine").start();
-  } catch (err) {
-    dockerAvailable = false;
-    console.warn("[demand-intake.int] Docker unavailable — skipping:", err);
-    return;
+  let dbUrl: string;
+
+  if (INT_DATABASE_URL) {
+    // Run against the pre-migrated local Postgres — no Docker, no migrate step.
+    dbUrl = INT_DATABASE_URL;
+  } else {
+    try {
+      container = await new PostgreSqlContainer("postgres:16-alpine").start();
+    } catch (err) {
+      dockerAvailable = false;
+      console.warn("[demand-intake.int] Docker unavailable — skipping:", err);
+      return;
+    }
+
+    dbUrl = container.getConnectionUri();
+
+    execFileSync("prisma", ["migrate", "deploy"], {
+      cwd: DB_PKG_ROOT,
+      env: { ...process.env, DATABASE_URL: dbUrl },
+      stdio: "inherit",
+      shell: true,
+    });
   }
-
-  const dbUrl = container.getConnectionUri();
-
-  execFileSync("prisma", ["migrate", "deploy"], {
-    cwd: DB_PKG_ROOT,
-    env: { ...process.env, DATABASE_URL: dbUrl },
-    stdio: "inherit",
-    shell: true,
-  });
 
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
   })
-    .overrideProvider("ConfigService")
-    .useFactory({
-      factory: () => ({
-        get: (key: string) => {
-          if (key === "DATABASE_URL") return dbUrl;
-          if (key === "OIDC_ISSUER") return "https://test.example.com";
-          if (key === "OIDC_AUDIENCE") return "epm-api";
-          return undefined;
-        },
-      }),
-    })
-    .overrideProvider("TOKEN_VERIFIER")
-    .useValue({
-      verify: (token: string) => {
-        if (!token.startsWith("fake.")) throw new Error("Unauthorized");
-        const payload = JSON.parse(Buffer.from(token.slice(5), "base64").toString());
-        return Promise.resolve({
-          userId:       payload.userId,
-          roles:        payload.roles,
-          recordScopes: [],
-        });
-      },
-    })
+    .overrideProvider(ConfigService)
+    .useValue(makeTestConfig(dbUrl))
+    .overrideProvider(TokenVerifier)
+    .useValue(fakeTokenVerifier())
     .compile();
 
   app = moduleRef.createNestApplication();
@@ -167,7 +200,7 @@ describe("8.1 — submit intake request (US-029)", () => {
       title: "Customer Self-Service Portal",
       status: "Submitted",
       currentGate: "Submitted",
-      submittedBy: "user-pm-a",
+      submittedBy: PM_A_ID,
     });
   });
 

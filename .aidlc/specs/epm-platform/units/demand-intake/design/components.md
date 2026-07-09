@@ -253,7 +253,7 @@ idempotently with `sourceDemandId = demandId`, so re-publishing is safe.
 | View ranked list | ✅ | ✅ | ❌ |
 | Advance gate (`Submitted→Screening`) | ✅ | ✅ (`intake-gate:screening`) | ❌ |
 | Advance gate (`Screening→Evaluation`) | ✅ | ✅ (`intake-gate:evaluation`) | ❌ |
-| Advance gate (`Evaluation→Approved`) | ✅ | ✅ (`intake-gate:approval`) | ❌ |
+| Advance gate (`Evaluation→Approved`) | ✅ (`intake-gate:approval`) | ❌ (separation of duties — Director-only) | ❌ |
 | Reject gate | ✅ | ✅ | ❌ |
 | Promote demand to project | ✅ | ✅ | ❌ |
 

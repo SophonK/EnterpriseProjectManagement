@@ -452,7 +452,10 @@ model ScoreCard {
   demandRequest DemandRequest    @relation(fields: [demandRequestId], references: [id], onDelete: Cascade)
   scores        CriterionScore[]
 
-  @@unique([demandRequestId], name: "uq_score_card_demand")
+  // `map` (DB constraint name) not `name`: a custom Prisma-level `name` on a single-field
+  // @@unique makes the constraint unusable in `where` (findUnique/upsert). `map` keeps the
+  // DB constraint name identical (no migration drift) while exposing `where: { demandRequestId }`.
+  @@unique([demandRequestId], map: "uq_score_card_demand")
   @@map("score_card")
   @@schema("intake")
 }

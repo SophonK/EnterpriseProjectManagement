@@ -31,12 +31,24 @@ export class ProblemDetailsFilter implements ExceptionFilter {
     }
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
+      // Pipes/guards may embed a domain error code + detail in the exception body
+      // (e.g. ZodValidationPipe → { code: "DEMAND_001", detail }). Surface it when
+      // present; otherwise fall back to the generic HTTP_<status> code.
+      const body = exception.getResponse();
+      const embedded =
+        typeof body === "object" && body !== null
+          ? (body as { code?: unknown; detail?: unknown })
+          : undefined;
+      const code =
+        typeof embedded?.code === "string" ? embedded.code : `HTTP_${status}`;
+      const detail =
+        typeof embedded?.detail === "string" ? embedded.detail : exception.message;
       return {
         type: `/errors/http-${status}`,
         title: exception.name,
         status,
-        detail: exception.message,
-        code: `HTTP_${status}`,
+        detail,
+        code,
         requestId,
       };
     }
