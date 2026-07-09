@@ -33,8 +33,9 @@ function makePrisma() {
       findMany: vi.fn(),
     },
     scoreCard: {
-      upsert: vi.fn(),
-      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
     },
     criterionScore: {
       deleteMany: vi.fn(),
@@ -382,7 +383,8 @@ describe("ScoreCardRepository", () => {
   });
 
   it("upsert — upserts card on demandRequestId unique and replaces criterion scores in a tx", async () => {
-    prisma.scoreCard.upsert.mockResolvedValue(cardRow());
+    prisma.scoreCard.findFirst.mockResolvedValue(null);
+    prisma.scoreCard.create.mockResolvedValue(cardRow());
     prisma.criterionScore.deleteMany.mockResolvedValue({ count: 2 });
     prisma.criterionScore.createMany.mockResolvedValue({ count: 2 });
     prisma.criterionScore.findMany.mockResolvedValue([
@@ -402,8 +404,9 @@ describe("ScoreCardRepository", () => {
     });
 
     expect(prisma.$transaction).toHaveBeenCalledOnce();
-    // Upsert keyed on the demandRequestId unique.
-    expect(prisma.scoreCard.upsert.mock.calls[0][0].where).toEqual({
+    // Looked up the existing card by the demandRequestId unique via findFirst (avoids the
+    // named single-field @@unique runtime quirk), then created it.
+    expect(prisma.scoreCard.findFirst.mock.calls[0][0].where).toEqual({
       demandRequestId: "dr-1",
     });
     // Replace = delete existing then createMany new.
@@ -421,7 +424,8 @@ describe("ScoreCardRepository", () => {
   });
 
   it("upsert — deletes existing scores even when the new set is empty", async () => {
-    prisma.scoreCard.upsert.mockResolvedValue(cardRow());
+    prisma.scoreCard.findFirst.mockResolvedValue(null);
+    prisma.scoreCard.create.mockResolvedValue(cardRow());
     prisma.criterionScore.deleteMany.mockResolvedValue({ count: 1 });
     prisma.criterionScore.findMany.mockResolvedValue([]);
 
@@ -437,17 +441,17 @@ describe("ScoreCardRepository", () => {
   });
 
   it("findByRequest — returns null when no card", async () => {
-    prisma.scoreCard.findUnique.mockResolvedValue(null);
+    prisma.scoreCard.findFirst.mockResolvedValue(null);
     expect(await repo.findByRequest("dr-x")).toBeNull();
   });
 
   it("findByRequest — maps the card and its scores", async () => {
-    prisma.scoreCard.findUnique.mockResolvedValue({
+    prisma.scoreCard.findFirst.mockResolvedValue({
       ...cardRow(),
       scores: [{ criterionId: "crit-1", rawScore: 90 }],
     });
     const dto = await repo.findByRequest("dr-1");
-    expect(prisma.scoreCard.findUnique).toHaveBeenCalledWith(
+    expect(prisma.scoreCard.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { demandRequestId: "dr-1" },
       }),
