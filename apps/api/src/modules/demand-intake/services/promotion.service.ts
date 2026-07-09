@@ -26,9 +26,14 @@ export class PromotionService {
    * BR-208: promote succeeds only when status = Approved (else DEMAND_006 — this also
    * guards re-promotion, since Promoted is terminal). The Portfolio Manager supplies the
    * promotion params the intake form lacks; `name` defaults from the demand title. Sets
-   * status = Promoted (terminal), audits, then publishes demand-intake.demand.promoted with
-   * the EXACT project-execution DemandPromotedPayload. Safe to retry — project-execution
-   * dedupes project creation by sourceDemandId.
+   * status = Promoted (terminal), audits, then dispatches demand-intake.demand.promoted with
+   * the EXACT project-execution DemandPromotedPayload.
+   *
+   * C2: the event is dispatched STRICTLY and INSIDE the transaction — if project-execution's
+   * handler fails (e.g. a transient DB error), `dispatch` re-throws, the whole promote rolls
+   * back, and the demand stays Approved (retryable) rather than becoming an orphaned Promoted
+   * with no project. project-execution dedupes project creation by sourceDemandId, so a retry
+   * never creates a duplicate.
    */
   async promoteToProject(
     demandRequestId: string,
@@ -37,9 +42,9 @@ export class PromotionService {
     requestId: string,
   ): Promise<DemandRequestDTO> {
     // REL-DI-03 / SEC-DI-05: row lock + Approved-status check (fail-closed, before any write)
-    // + status change + audit in ONE transaction. The lock also guards concurrent promotes —
-    // once one commits Promoted, the other re-reads Promoted and fails DEMAND_006.
-    const { updated, title } = await this.prisma.$transaction(async (tx) => {
+    // + status change + audit + strict event dispatch in ONE transaction. The lock also guards
+    // concurrent promotes — once one commits Promoted, the other re-reads Promoted → DEMAND_006.
+    return await this.prisma.$transaction(async (tx) => {
       const request = await this.demandRepo.findByIdScopedForUpdate(demandRequestId, ctx, tx); // DEMAND_002
 
       if (request.status !== "Approved") {
@@ -64,25 +69,24 @@ export class PromotionService {
         tx,
       );
 
-      return { updated: next, title: request.title };
-    });
+      // Strict, in-transaction: a downstream project-creation failure rolls this promote back.
+      await this.eventBus.dispatch({
+        eventId: randomUUID(),
+        eventType: DEMAND_INTAKE_EVENTS.DEMAND_PROMOTED,
+        occurredAt: new Date().toISOString(),
+        source: "demand-intake",
+        data: {
+          demandId: demandRequestId,
+          name: request.title,
+          portfolioId: cmd.portfolioId,
+          programId: cmd.programId ?? null,
+          plannedStart: cmd.plannedStart,
+          plannedEnd: cmd.plannedEnd,
+          plannedBudget: cmd.plannedBudget ?? null,
+        },
+      });
 
-    await this.eventBus.publish({
-      eventId: randomUUID(),
-      eventType: DEMAND_INTAKE_EVENTS.DEMAND_PROMOTED,
-      occurredAt: new Date().toISOString(),
-      source: "demand-intake",
-      data: {
-        demandId: demandRequestId,
-        name: title,
-        portfolioId: cmd.portfolioId,
-        programId: cmd.programId ?? null,
-        plannedStart: cmd.plannedStart,
-        plannedEnd: cmd.plannedEnd,
-        plannedBudget: cmd.plannedBudget ?? null,
-      },
+      return next;
     });
-
-    return updated;
   }
 }

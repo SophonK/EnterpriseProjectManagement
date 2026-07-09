@@ -70,10 +70,10 @@ export class ProjectAlignmentProjector implements OnModuleInit {
   }
 
   /**
-   * A newly created project is projected with its initial `Open` status. The created
-   * payload carries no budget, so `plannedBudget` starts null (a later status-changed or
-   * update reconciles it). Alignment is evaluated only when the projection was written
-   * (a stale/out-of-order event is a no-op — REL-SP-02).
+   * A newly created project is projected with its initial `Open` status and its
+   * planned budget (H3 — the created payload now carries `plannedBudget`, so
+   * investment-mix budget totals are populated from creation). Alignment is evaluated
+   * only when the projection was written (a stale/out-of-order event is a no-op — REL-SP-02).
    */
   private async onProjectCreated(event: DomainEvent<ProjectCreatedPayload>): Promise<void> {
     const written = await this.viewRepo.upsertByProjectId(
@@ -81,7 +81,7 @@ export class ProjectAlignmentProjector implements OnModuleInit {
         projectId: event.data.projectId,
         name: event.data.name,
         status: CREATED_STATUS,
-        plannedBudget: null,
+        plannedBudget: event.data.plannedBudget ?? null,
         portfolioId: event.data.portfolioId,
         programId: event.data.programId,
       },

@@ -50,6 +50,10 @@ function makeCapturingBus() {
       publish: vi.fn(async (event: DomainEvent<Record<string, unknown>>) => {
         published.push(event);
       }),
+      // promote uses strict dispatch (C2); capture it the same way for payload assertions
+      dispatch: vi.fn(async (event: DomainEvent<Record<string, unknown>>) => {
+        published.push(event);
+      }),
       subscribe: vi.fn(),
     },
   };

@@ -43,4 +43,25 @@ describe("InProcessEventBus", () => {
     expect(() => bus.subscribe("not-valid", async () => {})).toThrow();
     await expect(bus.publish(evt("not-valid"))).rejects.toThrow();
   });
+
+  it("dispatch runs all handlers but re-throws the first failure (C2)", async () => {
+    const logger = { error: vi.fn() };
+    const bus = new InProcessEventBus(logger as never);
+    const seen: string[] = [];
+    bus.subscribe("a.b.c", async () => {
+      throw new Error("boom");
+    });
+    bus.subscribe("a.b.c", async () => void seen.push("ran"));
+
+    await expect(bus.dispatch(evt("a.b.c"))).rejects.toThrow("boom");
+    expect(seen).toEqual(["ran"]); // siblings still ran before the re-throw
+  });
+
+  it("dispatch resolves when every handler succeeds", async () => {
+    const bus = new InProcessEventBus(noopLogger);
+    const seen: string[] = [];
+    bus.subscribe("a.b.c", async () => void seen.push("h1"));
+    await expect(bus.dispatch(evt("a.b.c"))).resolves.toBeUndefined();
+    expect(seen).toEqual(["h1"]);
+  });
 });

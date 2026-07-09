@@ -93,6 +93,7 @@ export class ProjectService {
         programId: dto.programId,
         name: dto.name,
         ownerUserId: dto.ownerUserId,
+        plannedBudget: dto.plannedBudget ?? null,
       },
     });
 

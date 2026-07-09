@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import "../../../../../../packages/shared/src/errors/demand-error-codes.js";
 import { PromotionService } from "../services/promotion.service.js";
-import type { AuthContext, DemandRequestDTO } from "@epm/shared";
+import { AppError, type AuthContext, type DemandRequestDTO } from "@epm/shared";
 
 const CTX: AuthContext = { userId: "user-1", roles: ["PORTFOLIO_MANAGER"], recordScopes: [] };
 
@@ -38,7 +38,11 @@ function makeDemandRepo(request: DemandRequestDTO) {
 }
 
 function makeEventBus() {
-  return { publish: vi.fn().mockResolvedValue(undefined), subscribe: vi.fn() };
+  return {
+    publish: vi.fn().mockResolvedValue(undefined),
+    dispatch: vi.fn().mockResolvedValue(undefined),
+    subscribe: vi.fn(),
+  };
 }
 
 function makeAudit() {
@@ -84,7 +88,7 @@ describe("PromotionService.promoteToProject — BR-208", () => {
       TX,
     );
     // name defaults from the demand title; payload byte-matches DemandPromotedPayload
-    expect(eventBus.publish).toHaveBeenCalledWith(
+    expect(eventBus.dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "demand-intake.demand.promoted",
         source: "demand-intake",
@@ -114,7 +118,7 @@ describe("PromotionService.promoteToProject — BR-208", () => {
       // Fail-closed inside the tx: the non-Approved status check throws before any write,
       // so nothing is mutated and no event escapes the rolled-back transaction.
       expect(repo.updateStatusGate).not.toHaveBeenCalled();
-      expect(eventBus.publish).not.toHaveBeenCalled();
+      expect(eventBus.dispatch).not.toHaveBeenCalled();
     },
   );
 
@@ -130,10 +134,26 @@ describe("PromotionService.promoteToProject — BR-208", () => {
       "req-1",
     );
 
-    expect(eventBus.publish).toHaveBeenCalledWith(
+    expect(eventBus.dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ programId: null, plannedBudget: null }),
       }),
     );
+  });
+
+  // C2: a downstream project-creation failure propagates out of the strict dispatch, so the
+  // promote transaction rolls back and the caller gets an error (demand stays Approved →
+  // retryable) instead of an orphaned Promoted with no project.
+  it("propagates a dispatch (project-creation) failure so the promote is retryable, not orphaned", async () => {
+    const repo = makeDemandRepo(makeDemandDTO({ status: "Approved" }));
+    const eventBus = makeEventBus();
+    eventBus.dispatch.mockRejectedValueOnce(new AppError("EXECUTION_004", "duplicate project name"));
+    const svc = new PromotionService(repo as never, eventBus as never, makeAudit() as never, makePrisma() as never);
+
+    await expect(
+      svc.promoteToProject("demand-1", PROMOTE_CMD, CTX, "req-1"),
+    ).rejects.toMatchObject({ code: "EXECUTION_004" });
+    // dispatch was attempted inside the transaction; its failure aborts the promote.
+    expect(eventBus.dispatch).toHaveBeenCalledTimes(1);
   });
 });

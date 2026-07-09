@@ -18,6 +18,7 @@ export interface ProjectCreatedPayload {
   programId: string | null;
   name: string;
   ownerUserId: string;
+  plannedBudget: number | null;
 }
 
 export interface ProjectArchivedPayload {
