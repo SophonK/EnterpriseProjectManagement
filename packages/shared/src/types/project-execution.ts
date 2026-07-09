@@ -98,6 +98,7 @@ export const CreateProjectSchema = z
     plannedStart: isoDateString,
     plannedEnd: isoDateString,
     plannedBudget: z.number().positive().nullish(),
+    sourceDemandId: z.string().uuid().nullish(),
   })
   .refine((d) => d.plannedEnd >= d.plannedStart, {
     message: "plannedEnd must be on or after plannedStart",

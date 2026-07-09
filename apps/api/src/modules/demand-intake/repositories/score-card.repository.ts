@@ -34,22 +34,29 @@ export class ScoreCardRepository extends BaseRepository {
     // When the caller supplies a transaction client, reuse it so the card + criterion-score
     // rows commit atomically with the caller's other writes; otherwise open a local one.
     const run = async (tx: Prisma.TransactionClient): Promise<ScoreCardDTO> => {
-      const card = await tx.scoreCard.upsert({
+      // upsert via findFirst + create/update: avoids named-unique runtime quirks
+      const existing = await tx.scoreCard.findFirst({
         where: { demandRequestId: data.demandRequestId },
-        create: {
-          demandRequestId: data.demandRequestId,
-          scoringModelId: data.scoringModelId,
-          weightedTotal,
-          scoredBy: data.scoredBy,
-          updatedAt: new Date(),
-        },
-        update: {
-          scoringModelId: data.scoringModelId,
-          weightedTotal,
-          scoredBy: data.scoredBy,
-          updatedAt: new Date(),
-        },
       });
+      const card = existing
+        ? await tx.scoreCard.update({
+            where: { id: existing.id },
+            data: {
+              scoringModelId: data.scoringModelId,
+              weightedTotal,
+              scoredBy: data.scoredBy,
+              updatedAt: new Date(),
+            },
+          })
+        : await tx.scoreCard.create({
+            data: {
+              demandRequestId: data.demandRequestId,
+              scoringModelId: data.scoringModelId,
+              weightedTotal,
+              scoredBy: data.scoredBy,
+              updatedAt: new Date(),
+            },
+          });
 
       // Replace the criterion-score rows (delete existing, insert new set).
       await tx.criterionScore.deleteMany({ where: { scoreCardId: card.id } });
@@ -74,7 +81,7 @@ export class ScoreCardRepository extends BaseRepository {
   }
 
   async findByRequest(demandRequestId: string): Promise<ScoreCardDTO | null> {
-    const card = await this.prisma.scoreCard.findUnique({
+    const card = await this.prisma.scoreCard.findFirst({
       where: { demandRequestId },
       include: { scores: { orderBy: { createdAt: "asc" } } },
     });

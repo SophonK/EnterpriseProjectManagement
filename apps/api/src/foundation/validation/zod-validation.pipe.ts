@@ -1,10 +1,11 @@
-import { BadRequestException, type PipeTransform } from "@nestjs/common";
+import type { PipeTransform } from "@nestjs/common";
 import type { ZodSchema, ZodError } from "zod";
+import { AppError } from "@epm/shared";
 
 export class ZodValidationPipe<T> implements PipeTransform {
   constructor(
     private readonly schema: ZodSchema<T>,
-    private readonly errorCode = "EXECUTION_001",
+    private readonly errorCode: string = "EXECUTION_001",
   ) {}
 
   transform(value: unknown): T {
@@ -13,7 +14,7 @@ export class ZodValidationPipe<T> implements PipeTransform {
       const errors = (result.error as ZodError).errors.map(
         (e) => `${e.path.join(".")}: ${e.message}`,
       );
-      throw new BadRequestException({ code: this.errorCode, detail: errors.join("; ") });
+      throw new AppError(this.errorCode, errors.join("; "));
     }
     return result.data;
   }
